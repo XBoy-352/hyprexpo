@@ -594,6 +594,14 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
         if (closing)
             return;
 
+        // If expo hasn't animated in enough to be visible, close silently without
+        // consuming the event. This prevents phantom triggers (e.g. a bouncing
+        // mouse side-button firing the expo keybind) from swallowing real clicks.
+        if (size->getPercent() < 0.05f) {
+            close();
+            return;
+        }
+
         info.cancelled = true;
 
         selectHoveredWorkspace();
