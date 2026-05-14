@@ -1,4 +1,6 @@
-> HyprExpo+ may be an ephemeral plugin, it all depends how the [PR to `hyprland-plugins`](https://github.com/hyprwm/hyprland-plugins/pull/507) goes. When/if PR is accepted, this repo will be archived. Otherwise, if rejected, it will remain. It exists here to be easily installable during the interim. 
+> HyprExpo+ may be an ephemeral plugin, ~it all depends how the [PR to `hyprland-plugins`](https://github.com/hyprwm/hyprland-plugins/pull/507) goes. When/if PR is accepted, this repo will be archived. Otherwise, if rejected, it will remain. It exists here to be easily installable during the interim.~
+
+> Well that escalated a bit. HyprExpo was removed as an official plugin. I intend on continuing to maintain HyprExpo-Plus, as I use it every day and love it. It will probably be renamed to HyprExpo in the near future. Stay tuned. 
 
 # HyprExpo+
 HyprExpo+ is a fork of [HyprExpo](https://github.com/hyprwm/hyprland-plugins/tree/main/hyprexpo) that adds additional functionality.
