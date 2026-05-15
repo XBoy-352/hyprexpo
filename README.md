@@ -1,7 +1,3 @@
-> HyprExpo+ may be an ephemeral plugin, ~it all depends how the [PR to `hyprland-plugins`](https://github.com/hyprwm/hyprland-plugins/pull/507) goes. When/if PR is accepted, this repo will be archived. Otherwise, if rejected, it will remain. It exists here to be easily installable during the interim.~
-
-> It appears  the PR will never be merged since [HyprExpo was removed as an official plugin](https://github.com/hyprwm/hyprland-plugins/pull/507#issuecomment-4433386463). I intend on continuing to maintain HyprExpo-Plus, as I use it every day and love it.
-
 # HyprExpo+
 HyprExpo+ is a fork of HyprExpo that adds additional functionality. The original `hyprland-plugins` copy has since been removed, but the last upstream version is still available in [`hyprwm/hyprland-plugins` pull request #507](https://github.com/hyprwm/hyprland-plugins/pull/507/files#diff-dcf3e4cb819e592701c932f50137cc8d2a99a9348153788dca0e22f659ccaf2d). If you prefer a smaller maintained implementation, [`colonelpanic8/hyprexpo`](https://github.com/colonelpanic8/hyprexpo) is another standalone HyprExpo fork.
 
