@@ -114,7 +114,7 @@ static Config::FLOAT floatDefault(const std::string& name) {
 static Config::INTEGER intDefault(const std::string& name) {
     static const std::map<std::string, Config::INTEGER> DEFAULTS = {
         {"plugin:hyprexpo:columns", 3}, {"plugin:hyprexpo:gaps_in", 5},
-        {"plugin:hyprexpo:bg_col", 0xFF111111}, {"plugin:hyprexpo:gesture_distance", 200},
+        {"plugin:hyprexpo:bg_col", 0xFF111111}, {"plugin:hyprexpo:gesture_distance", 200}, {"plugin:hyprexpo:show_cursor", 1},
         {"plugin:hyprexpo:keynav_enable", 1}, {"plugin:hyprexpo:border_width", 2},
         {"plugin:hyprexpo:label_enable", 1}, {"plugin:hyprexpo:label_color", 0xFFFFFFFF},
         {"plugin:hyprexpo:label_font_size", 16}, {"plugin:hyprexpo:label_color_default", 0xFFFFFFFF},
@@ -323,64 +323,6 @@ static bool isGradientBorderSpec(const std::string& borderSpec) {
            borderSpec.rfind("rgba(") != borderSpec.find("rgba(");
 }
 
-static void renderGradientBorder(const CBox& box, int borderSize, const SHyprGradientSpec& grad, int round = 0) {
-    if (!grad.valid || borderSize <= 0)
-        return;
-
-    // gradient direction
-    const float  rad = grad.angleDeg * (float)M_PI / 180.f;
-    const Vector2D g{std::cos(rad), std::sin(rad)};
-    // compute min/max dot among corners
-    const Vector2D corners[4] = {{box.x, box.y}, {box.x + box.w, box.y}, {box.x, box.y + box.h}, {box.x + box.w, box.y + box.h}};
-    float         minD        = 1e9f, maxD = -1e9f;
-    for (auto& c : corners) {
-        float d = c.x * g.x + c.y * g.y;
-        minD    = std::min(minD, d);
-        maxD    = std::max(maxD, d);
-    }
-    const float range = std::max(1e-3f, maxD - minD);
-
-    auto mixCol = [](const CHyprColor& a, const CHyprColor& b, float t) {
-        t   = std::clamp(t, 0.f, 1.f);
-        auto m = CHyprColor{a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, a.a + (b.a - a.a) * t};
-        return m;
-    };
-
-    // choose segment counts
-    const int segW = std::clamp((int)std::round(box.w / 20.0), 8, 64);
-    const int segH = std::clamp((int)std::round(box.h / 20.0), 8, 64);
-
-    auto drawSeg = [&](const CBox& r) {
-        const float cx = r.x + r.w / 2.0;
-        const float cy = r.y + r.h / 2.0;
-        const float d  = cx * g.x + cy * g.y;
-        const float t  = (d - minD) / range;
-        Render::GL::g_pHyprOpenGL->renderRect(r, mixCol(grad.c1, grad.c2, t), {});
-    };
-
-    const double cr = std::clamp((double)round, 0.0, std::min(box.w, box.h) / 2.0);
-
-    // top and bottom bars (shrink horizontally by cr)
-    if (box.w > 2 * cr) {
-        for (int i = 0; i < segW; ++i) {
-            const double sx = box.x + cr + (double)i * ((box.w - 2 * cr) / segW);
-            const double sw = (i == segW - 1) ? (box.x + box.w - cr - sx) : ((box.w - 2 * cr) / segW);
-            drawSeg(CBox{sx, box.y, sw, (double)borderSize});
-            drawSeg(CBox{sx, box.y + box.h - borderSize, sw, (double)borderSize});
-        }
-    }
-
-    // left and right bars (shrink vertically by cr)
-    if (box.h > 2 * cr) {
-        for (int i = 0; i < segH; ++i) {
-            const double sy = box.y + cr + (double)i * ((box.h - 2 * cr) / segH);
-            const double sh = (i == segH - 1) ? (box.y + box.h - cr - sy) : ((box.h - 2 * cr) / segH);
-            drawSeg(CBox{box.x, sy, (double)borderSize, sh});
-            drawSeg(CBox{box.x + box.w - borderSize, sy, (double)borderSize, sh});
-        }
-    }
-}
-
 static SP<Render::ITexture> renderNumberTexture(const std::string& text, const CHyprColor& color, const Vector2D& bufferSize, const float scale, const int fontSize) {
     const auto CAIROSURFACE = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, bufferSize.x, bufferSize.y);
     const auto CAIRO        = cairo_create(CAIROSURFACE);
@@ -506,6 +448,21 @@ static void removeOverview(WP<Hyprutils::Animation::CBaseAnimatedVariable> thisp
     g_pOverview.reset();
 }
 
+static bool shouldShowCursorDuringOverview() {
+    static auto* const* PSHOWCURSOR = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:show_cursor")->getDataStaticPtr();
+    return **PSHOWCURSOR;
+}
+
+static void ensureOverviewCursorVisible(bool refreshPosition = false) {
+    if (!shouldShowCursorDuringOverview())
+        return;
+
+    g_pHyprRenderer->setCursorHidden(false);
+    g_pPointerManager->resetCursorImage();
+    if (refreshPosition)
+        g_pInputManager->simulateMouseMovement();
+}
+
 // Get workspace method configuration for a specific monitor
 // Returns pair of {isCenter, startWorkspaceID}
 static std::pair<bool, int> getWorkspaceMethodForMonitor(PHLMONITOR monitor) {
@@ -514,73 +471,53 @@ static std::pair<bool, int> getWorkspaceMethodForMonitor(PHLMONITOR monitor) {
     const std::string monitorName = monitor->m_name;
     const std::string configStr = std::string{*PMETHOD};
 
-    // Priority order:
-    // 1. hyprexpo_workspace_method keyword (backwards compatibility)
-    // 2. plugin:hyprexpo:workspace_method with delimiter format
-
     std::string methodStr;
     bool foundMonitorConfig = false;
 
-    // First check hyprexpo_workspace_method keyword for this monitor (backwards compatibility)
-    auto it = g_monitorWorkspaceMethods.find(monitorName);
-    if (it != g_monitorWorkspaceMethods.end()) {
-        methodStr = it->second;
-        foundMonitorConfig = true;
-    } else {
-        // Parse plugin config value with delimiter support
-        // Supports:
-        // 1. Global: "center current" or "first 1"
-        // 2. Per-monitor: "DP-1 first 1, HDMI-1 center current"
-        // 3. The parser looks for 3-token groups (monitor method workspace) vs 2-token (method workspace)
+    // Parse plugin config value with delimiter support:
+    // 1. Global: "center current" or "first 1"
+    // 2. Per-monitor: "DP-1 first 1, HDMI-1 center current"
+    // 3. Mixed: "DP-1 first 1, center current"
+    std::vector<std::string> entries;
+    size_t start = 0;
+    while (start < configStr.size()) {
+        size_t commaPos = configStr.find(',', start);
+        if (commaPos == std::string::npos)
+            commaPos = configStr.size();
 
-        // Split by commas to get individual entries
-        std::vector<std::string> entries;
-        size_t start = 0;
-        while (start < configStr.size()) {
-            size_t commaPos = configStr.find(',', start);
-            if (commaPos == std::string::npos)
-                commaPos = configStr.size();
+        std::string entry = configStr.substr(start, commaPos - start);
+        size_t firstNonSpace = entry.find_first_not_of(" \t");
+        size_t lastNonSpace = entry.find_last_not_of(" \t");
+        if (firstNonSpace != std::string::npos)
+            entry = entry.substr(firstNonSpace, lastNonSpace - firstNonSpace + 1);
 
-            std::string entry = configStr.substr(start, commaPos - start);
-            // Trim whitespace
-            size_t firstNonSpace = entry.find_first_not_of(" \t");
-            size_t lastNonSpace = entry.find_last_not_of(" \t");
-            if (firstNonSpace != std::string::npos)
-                entry = entry.substr(firstNonSpace, lastNonSpace - firstNonSpace + 1);
+        if (!entry.empty())
+            entries.push_back(entry);
 
-            if (!entry.empty())
-                entries.push_back(entry);
+        start = commaPos + 1;
+    }
 
-            start = commaPos + 1;
-        }
+    std::string globalFallback;
+    for (const auto& entry : entries) {
+        CVarList tokens{entry, 0, 's', true};
 
-        // Try to find a monitor-specific config
-        std::string globalFallback;
-        for (const auto& entry : entries) {
-            CVarList tokens{entry, 0, 's', true};
-
-            if (tokens.size() == 3) {
-                // Format: "MONITOR method workspace"
-                std::string entryMonitor = std::string{tokens[0]};
-                if (entryMonitor == monitorName) {
-                    // Found config for this monitor
-                    methodStr = std::string{tokens[1]} + " " + std::string{tokens[2]};
-                    foundMonitorConfig = true;
-                    break;
-                }
-            } else if (tokens.size() == 2 && globalFallback.empty()) {
-                // Format: "method workspace" - save as global fallback
-                globalFallback = entry;
+        if (tokens.size() == 3) {
+            const std::string entryMonitor = std::string{tokens[0]};
+            if (entryMonitor == monitorName) {
+                methodStr = std::string{tokens[1]} + " " + std::string{tokens[2]};
+                foundMonitorConfig = true;
+                break;
             }
+        } else if (tokens.size() == 2 && globalFallback.empty()) {
+            globalFallback = entry;
         }
+    }
 
-        // If no monitor-specific config found, use global fallback or original string
-        if (!foundMonitorConfig) {
-            if (!globalFallback.empty())
-                methodStr = globalFallback;
-            else
-                methodStr = configStr;
-        }
+    if (!foundMonitorConfig) {
+        if (!globalFallback.empty())
+            methodStr = globalFallback;
+        else
+            methodStr = configStr;
     }
 
     // Parse the method string (format: "method workspace")
@@ -603,8 +540,7 @@ static std::pair<bool, int> getWorkspaceMethodForMonitor(PHLMONITOR monitor) {
 COverview::~COverview() {
     Render::GL::g_pHyprOpenGL->makeEGLCurrent();
     images.clear(); // otherwise we get a vram leak
-    g_pPointerManager->resetCursorImage();
-    g_pInputManager->simulateMouseMovement();
+    ensureOverviewCursorVisible(true);
     if (pMonitor)
         pMonitor->m_blurFBDirty = true;
     resetSubmapIfNeeded();
@@ -804,7 +740,7 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
 
     openedID = currentid;
 
-    g_pPointerManager->resetCursorImage();
+    ensureOverviewCursorVisible(true);
 
     lastMousePosLocal = g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position;
 
@@ -816,6 +752,8 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
     mouseMoveHook = Event::bus()->m_events.input.mouse.move.listen([this](const Vector2D& coords, Event::SCallbackInfo& info) {
         if (closing)
             return;
+
+        ensureOverviewCursorVisible(false);
 
         info.cancelled    = true;
         lastMousePosLocal = g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position;
@@ -1259,10 +1197,9 @@ void COverview::close(bool switchToSelection) {
 
         const auto OLDWS = pMonitor->m_activeWorkspace;
 
-        if (!NEWIDWS)
-            Config::Actions::changeWorkspace(std::to_string(NEWID));
-        else
-            Config::Actions::changeWorkspace(NEWIDWS->getConfigName());
+        const auto CHANGE = !NEWIDWS ? Config::Actions::changeWorkspace(std::to_string(NEWID)) : Config::Actions::changeWorkspace(NEWIDWS->getConfigName());
+        if (!CHANGE)
+            Log::logger->log(Log::ERR, "[hyprexpo] failed to change workspace: {}", CHANGE.error().message);
 
         g_pDesktopAnimationManager->startAnimation(pMonitor->m_activeWorkspace, CDesktopAnimationManager::ANIMATION_TYPE_IN, true, true);
         g_pDesktopAnimationManager->startAnimation(OLDWS, CDesktopAnimationManager::ANIMATION_TYPE_OUT, false, true);
@@ -1360,7 +1297,6 @@ void COverview::fullRender() {
 
     // overlays: numbers and borders
     static auto* const* PLABELEN   = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:label_enable")->getDataStaticPtr();
-    static auto* const* PLABELCOL  = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:label_color")->getDataStaticPtr();
     static auto* const* PLABELSIZE = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:label_font_size")->getDataStaticPtr();
     static auto  const* PLABELPOS  = (Hyprlang::STRING const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:label_position")->getDataStaticPtr();
     static auto  const* PLABELMODE = (Hyprlang::STRING const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:label_text_mode")->getDataStaticPtr();
@@ -1621,12 +1557,12 @@ void COverview::fullRender() {
         drawBorderForID(kbFocusID, std::string{*PBCOLFOC}, std::string{*PBGREFOC}, RND_FOC);
 }
 
-static float lerp(const float& from, const float& to, const float perc) {
+static float lerpFloat(const float& from, const float& to, const float perc) {
     return (to - from) * perc + from;
 }
 
 static Vector2D lerp(const Vector2D& from, const Vector2D& to, const float perc) {
-    return Vector2D{lerp(from.x, to.x, perc), lerp(from.y, to.y, perc)};
+    return Vector2D{lerpFloat(from.x, to.x, perc), lerpFloat(from.y, to.y, perc)};
 }
 
 void COverview::setClosing(bool closing_) {

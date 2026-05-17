@@ -15,10 +15,8 @@
 #include <hyprland/src/managers/input/trackpad/TrackpadGestures.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
 
-#include <hyprutils/string/ConstVarList.hpp>
 #include <lua.hpp>
 #include <xkbcommon/xkbcommon.h>
-using namespace Hyprutils::String;
 
 #include <algorithm>
 #include <charconv>
@@ -38,6 +36,7 @@ typedef void (*origAddDamageA)(void*, const CBox&);
 typedef void (*origAddDamageB)(void*, const pixman_region32_t*);
 
 static bool g_unloading = false;
+static SP<Config::Values::CStringValue> g_pCancelKeyConfig;
 
 // Do NOT change this function.
 APICALL EXPORT std::string PLUGIN_API_VERSION() {
@@ -53,6 +52,7 @@ static SDispatchResult onKbConfirmDispatcher(std::string arg);
 static SDispatchResult onKbSelectNumberDispatcher(std::string arg);
 static SDispatchResult onKbSelectTokenDispatcher(std::string arg);
 static SDispatchResult onKbSelectIndexDispatcher(std::string arg);
+static SDispatchResult registerExpoGesture(int fingerCount, const std::string& directionName, const std::string& action, const std::string& mods, float deltaScale, bool disableInhibit);
 
 static std::string trimString(std::string value) {
     while (!value.empty() && std::isspace((unsigned char)value.front()))
@@ -100,9 +100,7 @@ static bool keyNameMatchesKeysym(const std::string& keyName, xkb_keysym_t keysym
 }
 
 static bool matchesCancelKey(xkb_keysym_t keysym) {
-    static auto const* PCANCELKEY = (Hyprlang::STRING const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:cancel_key")->getDataStaticPtr();
-
-    std::string keyConfig = *PCANCELKEY;
+    std::string keyConfig = g_pCancelKeyConfig ? g_pCancelKeyConfig->value() : "escape";
     size_t      start     = 0;
 
     while (start <= keyConfig.size()) {
@@ -185,6 +183,76 @@ static std::string luaIntegerArg(lua_State* L, int index, const char* name) {
     return "";
 }
 
+static std::string luaTableStringField(lua_State* L, const char* name, const char* field, const char* defaultValue = nullptr) {
+    lua_getfield(L, 1, field);
+    if (lua_isnil(L, -1)) {
+        lua_pop(L, 1);
+        if (defaultValue)
+            return defaultValue;
+        luaL_error(L, "%s: field '%s' must be a string", name, field);
+        return "";
+    }
+
+    if (lua_type(L, -1) != LUA_TSTRING) {
+        lua_pop(L, 1);
+        luaL_error(L, "%s: field '%s' must be a string", name, field);
+        return "";
+    }
+
+    std::string value = lua_tostring(L, -1);
+    lua_pop(L, 1);
+    return value;
+}
+
+static int luaTableIntegerField(lua_State* L, const char* name, const char* field) {
+    lua_getfield(L, 1, field);
+    if (!lua_isinteger(L, -1)) {
+        lua_pop(L, 1);
+        luaL_error(L, "%s: field '%s' must be an integer", name, field);
+        return 0;
+    }
+
+    const int value = lua_tointeger(L, -1);
+    lua_pop(L, 1);
+    return value;
+}
+
+static float luaTableFloatField(lua_State* L, const char* name, const char* field, float defaultValue) {
+    lua_getfield(L, 1, field);
+    if (lua_isnil(L, -1)) {
+        lua_pop(L, 1);
+        return defaultValue;
+    }
+
+    if (!lua_isnumber(L, -1)) {
+        lua_pop(L, 1);
+        luaL_error(L, "%s: field '%s' must be a number", name, field);
+        return defaultValue;
+    }
+
+    const float value = lua_tonumber(L, -1);
+    lua_pop(L, 1);
+    return value;
+}
+
+static bool luaTableBoolField(lua_State* L, const char* name, const char* field, bool defaultValue) {
+    lua_getfield(L, 1, field);
+    if (lua_isnil(L, -1)) {
+        lua_pop(L, 1);
+        return defaultValue;
+    }
+
+    if (lua_type(L, -1) != LUA_TBOOLEAN) {
+        lua_pop(L, 1);
+        luaL_error(L, "%s: field '%s' must be a boolean", name, field);
+        return defaultValue;
+    }
+
+    const bool value = lua_toboolean(L, -1);
+    lua_pop(L, 1);
+    return value;
+}
+
 static int luaExpo(lua_State* L) {
     return luaDispatchResult(L, "hyprexpo.expo", onExpoDispatcher(luaStringArg(L, 1, "hyprexpo.expo", "toggle")));
 }
@@ -207,6 +275,19 @@ static int luaKbSelectToken(lua_State* L) {
 
 static int luaKbSelectIndex(lua_State* L) {
     return luaDispatchResult(L, "hyprexpo.kb_selecti", onKbSelectIndexDispatcher(luaIntegerArg(L, 1, "hyprexpo.kb_selecti")));
+}
+
+static int luaGesture(lua_State* L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+
+    const int         fingers        = luaTableIntegerField(L, "hyprexpo.gesture", "fingers");
+    const std::string direction      = luaTableStringField(L, "hyprexpo.gesture", "direction");
+    const std::string action         = luaTableStringField(L, "hyprexpo.gesture", "action", "expo");
+    const std::string mods           = luaTableStringField(L, "hyprexpo.gesture", "mods", "");
+    const float       scale          = luaTableFloatField(L, "hyprexpo.gesture", "scale", 1.0F);
+    const bool        disableInhibit = luaTableBoolField(L, "hyprexpo.gesture", "disable_inhibit", false);
+
+    return luaDispatchResult(L, "hyprexpo.gesture", registerExpoGesture(fingers, direction, action, mods, scale, disableInhibit));
 }
 
 //
@@ -287,123 +368,35 @@ static void failNotif(const std::string& reason) {
     HyprlandAPI::addNotification(PHANDLE, "[hyprexpo] Failure in initialization: " + reason, CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
 }
 
-static Hyprlang::CParseResult workspaceMethodKeyword(const char* LHS, const char* RHS) {
-    Hyprlang::CParseResult result;
-
+static SDispatchResult registerExpoGesture(int fingerCount, const std::string& directionName, const std::string& action, const std::string& mods, float deltaScale, bool disableInhibit) {
     if (g_unloading)
-        return result;
+        return {};
 
-    // Parse format - accepts both:
-    //   2 args: "method workspace" (global default)
-    //   3 args: "MONITOR_NAME method workspace" (per-monitor)
-    CConstVarList data(RHS);
+    if (fingerCount <= 1 || fingerCount >= 10)
+        return {.success = false, .error = std::format("invalid fingers '{}', expected 2-9", fingerCount)};
 
-    if (data.size() == 2) {
-        // Global format - not really needed since plugin config does this, but accept it
-        const std::string methodType = std::string{data[0]};
-        const std::string workspace = std::string{data[1]};
+    const auto direction = g_pTrackpadGestures->dirForString(directionName);
+    if (direction == TRACKPAD_GESTURE_DIR_NONE)
+        return {.success = false, .error = std::format("invalid direction '{}'", directionName)};
 
-        if (methodType != "center" && methodType != "first") {
-            result.setError(std::format("Invalid method type '{}', expected 'center' or 'first'", methodType).c_str());
-            return result;
-        }
+    uint32_t modMask = 0;
+    if (!mods.empty())
+        modMask = g_pKeybindManager->stringToModMask(mods);
 
-        // Don't store - let plugin config handle global default
-        // Just return success so it doesn't error
-        return result;
+    deltaScale = std::clamp(deltaScale, 0.1F, 10.F);
 
-    } else if (data.size() == 3) {
-        // Per-monitor format
-        const std::string monitorName = std::string{data[0]};
-        const std::string methodType = std::string{data[1]};
-        const std::string workspace = std::string{data[2]};
+    std::expected<void, std::string> result;
+    if (action == "expo")
+        result = g_pTrackpadGestures->addGesture(makeUnique<CExpoGesture>(), fingerCount, direction, modMask, deltaScale, disableInhibit);
+    else if (action == "unset")
+        result = g_pTrackpadGestures->removeGesture(fingerCount, direction, modMask, deltaScale, disableInhibit);
+    else
+        return {.success = false, .error = std::format("invalid action '{}', expected expo|unset", action)};
 
-        if (methodType != "center" && methodType != "first") {
-            result.setError(std::format("Invalid method type '{}', expected 'center' or 'first'", methodType).c_str());
-            return result;
-        }
+    if (!result)
+        return {.success = false, .error = result.error()};
 
-        // Store in global map
-        g_monitorWorkspaceMethods[monitorName] = methodType + " " + workspace;
-        return result;
-
-    } else {
-        result.setError("hyprexpo_workspace_method requires format: <center|first> <workspace> OR MONITOR_NAME <center|first> <workspace>");
-        return result;
-    }
-}
-
-static Hyprlang::CParseResult expoGestureKeyword(const char* LHS, const char* RHS) {
-    Hyprlang::CParseResult    result;
-
-    if (g_unloading)
-        return result;
-
-    CConstVarList             data(RHS);
-
-    size_t                    fingerCount = 0;
-    eTrackpadGestureDirection direction   = TRACKPAD_GESTURE_DIR_NONE;
-
-    try {
-        fingerCount = std::stoul(std::string{data[0]});
-    } catch (...) {
-        result.setError(std::format("Invalid value {} for finger count", data[0]).c_str());
-        return result;
-    }
-
-    if (fingerCount <= 1 || fingerCount >= 10) {
-        result.setError(std::format("Invalid value {} for finger count", data[0]).c_str());
-        return result;
-    }
-
-    direction = g_pTrackpadGestures->dirForString(data[1]);
-
-    if (direction == TRACKPAD_GESTURE_DIR_NONE) {
-        result.setError(std::format("Invalid direction: {}", data[1]).c_str());
-        return result;
-    }
-
-    int      startDataIdx = 2;
-    uint32_t modMask      = 0;
-    float    deltaScale   = 1.F;
-
-    while (true) {
-
-        if (data[startDataIdx].starts_with("mod:")) {
-            modMask = g_pKeybindManager->stringToModMask(std::string{data[startDataIdx].substr(4)});
-            startDataIdx++;
-            continue;
-        } else if (data[startDataIdx].starts_with("scale:")) {
-            try {
-                deltaScale = std::clamp(std::stof(std::string{data[startDataIdx].substr(6)}), 0.1F, 10.F);
-                startDataIdx++;
-                continue;
-            } catch (...) {
-                result.setError(std::format("Invalid delta scale: {}", std::string{data[startDataIdx].substr(6)}).c_str());
-                return result;
-            }
-        }
-
-        break;
-    }
-
-    std::expected<void, std::string> resultFromGesture;
-
-    if (data[startDataIdx] == "expo")
-        resultFromGesture = g_pTrackpadGestures->addGesture(makeUnique<CExpoGesture>(), fingerCount, direction, modMask, deltaScale, false);
-    else if (data[startDataIdx] == "unset")
-        resultFromGesture = g_pTrackpadGestures->removeGesture(fingerCount, direction, modMask, deltaScale, false);
-    else {
-        result.setError(std::format("Invalid gesture: {}", data[startDataIdx]).c_str());
-        return result;
-    }
-
-    if (!resultFromGesture) {
-        result.setError(resultFromGesture.error().c_str());
-        return result;
-    }
-
-    return result;
+    return {};
 }
 
 static void addConfigValue(SP<Config::Values::IValue> value) {
@@ -482,9 +475,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addLuaFunction(PHANDLE, "hyprexpo", "kb_selectn", ::luaKbSelectNumber);
     HyprlandAPI::addLuaFunction(PHANDLE, "hyprexpo", "kb_select", ::luaKbSelectToken);
     HyprlandAPI::addLuaFunction(PHANDLE, "hyprexpo", "kb_selecti", ::luaKbSelectIndex);
-
-    HyprlandAPI::addConfigKeyword(PHANDLE, "hyprexpo_gesture", ::expoGestureKeyword, {});
-    HyprlandAPI::addConfigKeyword(PHANDLE, "hyprexpo_workspace_method", ::workspaceMethodKeyword, {});
+    HyprlandAPI::addLuaFunction(PHANDLE, "hyprexpo", "gesture", ::luaGesture);
 
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:columns", "columns", 3));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:gaps_in", "inner gaps", 5));
@@ -493,12 +484,13 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // Global: "center current" or "first 1"
     // Per-monitor with comma delimiter: "DP-1 first 1, HDMI-1 center current"
     // Mixed: "DP-1 first 1, center current" (DP-1 uses first 1, others use center current)
-    // Note: hyprexpo_workspace_method keyword takes priority (backwards compatibility)
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:workspace_method", "workspace method", "center current"));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:skip_empty", "skip empty workspaces", 0));
 
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:gesture_distance", "gesture distance", 200));
-    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:cancel_key", "cancel key", "escape"));
+    g_pCancelKeyConfig = makeShared<Config::Values::CStringValue>("plugin:hyprexpo:cancel_key", "cancel key", "escape");
+    addConfigValue(g_pCancelKeyConfig);
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:show_cursor", "show cursor during overview", 1));
 
     // keyboard navigation + styling
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:keynav_enable", "key navigation enable", 1));
@@ -582,6 +574,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
     g_unloading = true;
 
     Config::mgr()->reload(); // we need to reload now to clear all the gestures
+    g_pCancelKeyConfig.reset();
 }
 
 //

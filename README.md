@@ -48,6 +48,7 @@ plugin {
 
         gesture_distance = 200 # how far is the "max" for the gesture
         cancel_key = escape # comma-separated key names; none/off disables
+        show_cursor = 1 # keep the cursor visible while overview is open
         gaps_out = 0 # outer margin (px)
     }
 }
@@ -139,6 +140,7 @@ plugin {
 | `plugin:hyprexpo:skip_empty` | bool (int) | skip empty workspaces using selector `m` (`1`) or show all with `r` (`0`) | `0` |
 | `plugin:hyprexpo:gesture_distance` | int | swipe distance considered "max" (px) | `200` |
 | `plugin:hyprexpo:cancel_key` | string | comma-separated key names that close overview without selecting; `none`/`off` disables | `escape` |
+| `plugin:hyprexpo:show_cursor` | bool (int) | keep cursor visible while overview is open; set `0` for old hidden-cursor behavior | `1` |
 
 ### Tile Appearance
 
@@ -254,12 +256,20 @@ hl.plugin.hyprexpo.kb_confirm()
 hl.plugin.hyprexpo.kb_selecti(1)
 hl.plugin.hyprexpo.kb_selectn(1)
 hl.plugin.hyprexpo.kb_select("1")
+
+hl.plugin.hyprexpo.gesture({
+    fingers = 4,
+    direction = "up",
+    action = "expo",
+})
 ```
 
 Lua wrappers validate argument types strictly: `expo`, `kb_focus`, and
 `kb_select` take strings; `kb_selecti` and `kb_selectn` take Lua integers or
 exact integer strings. Fractional numbers and partial numeric strings are
-rejected.
+rejected. `gesture` takes a table with `fingers`, `direction`, optional
+`action = "expo" | "unset"`, optional `mods`, optional `scale`, and optional
+`disable_inhibit`.
 
 ### Example Bindings
 
@@ -362,22 +372,61 @@ submap = reset
 
 ### Gestures
 
-Custom gesture keyword for HyprExpo-specific gestures:
+HyprExpo gestures use the Lua config surface on Hyprland 0.55:
+
+```lua
+-- Swipe up with 4 fingers to toggle overview
+hl.plugin.hyprexpo.gesture({
+    fingers = 4,
+    direction = "up",
+    action = "expo",
+})
+```
+
+This replaces the legacy `hyprexpo_gesture` custom keyword while preserving the
+plugin's live swipe behavior.
+
+### Migration
+
+Legacy custom keywords are not registered on Hyprland 0.55. Use the migration
+tool to rewrite repeatable workspace-method keywords and generate Lua gesture
+snippets:
+
+```bash
+python3 tools/hyprexpo-migrate-config.py ~/.config/hypr/hyprland.conf
+python3 tools/hyprexpo-migrate-config.py --write --lua-out ~/.config/hypr/hyprexpo.lua ~/.config/hypr/hyprland.conf
+```
+
+The tool migrates:
 
 ```ini
-# Swipe up with 4 fingers to toggle overview
+hyprexpo_workspace_method = DP-1 first 1
+hyprexpo_workspace_method = HDMI-A-1 center 5
 hyprexpo_gesture = swipe:4:up, hyprexpo:expo, toggle
 ```
 
-Uses the same syntax as Hyprland's `gesture` keyword.
+to:
+
+```ini
+plugin {
+    hyprexpo {
+        workspace_method = DP-1 first 1, HDMI-A-1 center 5
+    }
+}
+```
+
+and emits:
+
+```lua
+hl.plugin.hyprexpo.gesture({ fingers = 4, direction = "up", action = "expo" })
+```
 
 ### Per-Monitor Workspace Method
 
-The workspace method can be configured globally or per-monitor using two approaches:
+The workspace method can be configured globally or per-monitor with
+`plugin:hyprexpo:workspace_method`.
 
-#### Method 1: Plugin Config with Delimiter (Recommended)
-
-Use `plugin:hyprexpo:workspace_method` with comma-separated values:
+Use comma-separated values:
 
 **Format:**
 - **Global**: `<center|first> <workspace>`
@@ -415,41 +464,3 @@ plugin {
 - Format: `MONITOR method workspace` (3 tokens) for per-monitor
 - Format: `method workspace` (2 tokens) for global default
 - Parser automatically detects format based on token count
-
-#### Method 2: Custom Keyword (Backwards Compatibility)
-
-Use `hyprexpo_workspace_method` keyword (repeatable) at the top level:
-
-```ini
-# In hyprland.conf (outside plugin block)
-hyprexpo_workspace_method = DP-1 first 1
-hyprexpo_workspace_method = HDMI-A-1 center 5
-hyprexpo_workspace_method = eDP-1 first 10
-
-# In plugin block (global fallback)
-plugin {
-    hyprexpo {
-        workspace_method = center current
-    }
-}
-```
-
-**Priority Order:**
-1. `hyprexpo_workspace_method` keyword for specific monitor (highest priority)
-2. `plugin:hyprexpo:workspace_method` per-monitor config (from delimiter format)
-3. `plugin:hyprexpo:workspace_method` global default (fallback)
-
-**Avoiding Startup Errors with Custom Keywords:**
-
-Since `hyprexpo_workspace_method` is a custom keyword, it will cause startup errors if used in the main config (same issue as dispatchers). To avoid this, put it in a separate config file:
-
-```ini
-# ~/.config/hypr/hyprland.conf
-source = ~/.config/hypr/hyprexpo-config.conf
-
-# ~/.config/hypr/hyprexpo-config.conf
-hyprexpo_workspace_method = DP-1 first 1
-hyprexpo_workspace_method = HDMI-1 center current
-```
-
-**Recommendation:** Use Method 1 (delimiter format) to keep everything in the plugin block and avoid startup errors entirely.
