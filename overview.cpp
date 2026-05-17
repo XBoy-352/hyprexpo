@@ -24,7 +24,11 @@
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
 #include <pango/pangocairo.h>
+#include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <string>
+#include <vector>
 
 namespace CompatHyprlandAPI {
 struct SConfigValueCompat {
@@ -51,9 +55,12 @@ static bool isStringConfig(const std::string& name) {
         {"plugin:hyprexpo:label_text_mode", true},
         {"plugin:hyprexpo:label_token_map", true},
         {"plugin:hyprexpo:label_position", true},
+        {"plugin:hyprexpo:selection_label_token_map", true},
+        {"plugin:hyprexpo:selection_label_position", true},
         {"plugin:hyprexpo:label_show", true},
         {"plugin:hyprexpo:label_bg_shape", true},
         {"plugin:hyprexpo:label_font_family", true},
+        {"plugin:hyprexpo:cancel_key", true},
         {"plugin:hyprexpo:border_grad_current", true},
         {"plugin:hyprexpo:border_grad_focus", true},
         {"plugin:hyprexpo:border_grad_hover", true},
@@ -79,9 +86,12 @@ static Config::STRING stringDefault(const std::string& name) {
         {"plugin:hyprexpo:label_text_mode", "token"},
         {"plugin:hyprexpo:label_token_map", ""},
         {"plugin:hyprexpo:label_position", "center"},
+        {"plugin:hyprexpo:selection_label_token_map", "a,s,d,f,g,q,w,e,r,t,z,x,c,v,b"},
+        {"plugin:hyprexpo:selection_label_position", "top-right"},
         {"plugin:hyprexpo:label_show", "always"},
         {"plugin:hyprexpo:label_bg_shape", "circle"},
         {"plugin:hyprexpo:label_font_family", "sans"},
+        {"plugin:hyprexpo:cancel_key", "escape"},
         {"plugin:hyprexpo:border_grad_current", ""},
         {"plugin:hyprexpo:border_grad_focus", ""},
         {"plugin:hyprexpo:border_grad_hover", ""},
@@ -112,6 +122,8 @@ static Config::INTEGER intDefault(const std::string& name) {
         {"plugin:hyprexpo:label_color_current", 0xFF66CCFF}, {"plugin:hyprexpo:label_bg_enable", 1},
         {"plugin:hyprexpo:label_bg_color", 0x88000000}, {"plugin:hyprexpo:label_bg_rounding", 8},
         {"plugin:hyprexpo:label_padding", 8}, {"plugin:hyprexpo:label_pixel_snap", 1},
+        {"plugin:hyprexpo:selection_label_enable", 0}, {"plugin:hyprexpo:selection_label_offset_x", 6},
+        {"plugin:hyprexpo:selection_label_offset_y", 6}, {"plugin:hyprexpo:selection_label_color", 0xFFFFCC66},
         {"plugin:hyprexpo:keynav_wrap_h", 1}, {"plugin:hyprexpo:keynav_wrap_v", 1},
     };
 
@@ -168,6 +180,66 @@ static uint32_t framebufferFormatWithAlpha(uint32_t drmFormat) {
 static bool isTransformRotated(wl_output_transform t) {
     return t == WL_OUTPUT_TRANSFORM_90 || t == WL_OUTPUT_TRANSFORM_270 ||
            t == WL_OUTPUT_TRANSFORM_FLIPPED_90 || t == WL_OUTPUT_TRANSFORM_FLIPPED_270;
+}
+
+static std::string trimString(std::string value) {
+    while (!value.empty() && std::isspace((unsigned char)value.front()))
+        value.erase(value.begin());
+    while (!value.empty() && std::isspace((unsigned char)value.back()))
+        value.pop_back();
+    return value;
+}
+
+static std::vector<std::string> splitCommaList(const std::string& value) {
+    std::vector<std::string> entries;
+    size_t                   start = 0;
+
+    while (start <= value.size()) {
+        size_t comma = value.find(',', start);
+        if (comma == std::string::npos)
+            comma = value.size();
+
+        entries.push_back(trimString(value.substr(start, comma - start)));
+
+        if (comma == value.size())
+            break;
+        start = comma + 1;
+    }
+
+    return entries;
+}
+
+static std::string lowerString(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return std::tolower(c); });
+    return value;
+}
+
+static std::string fallbackTokenForVisibleIndex(int visibleIndex) {
+    if (visibleIndex < 9)
+        return std::to_string(visibleIndex + 1);
+    if (visibleIndex == 9)
+        return "0";
+    if (visibleIndex < 36)
+        return std::string(1, char('a' + visibleIndex - 10));
+
+    return "";
+}
+
+static int fallbackTokenToVisibleIndex(const std::string& token) {
+    if (token.size() != 1)
+        return -1;
+
+    const char c = token[0];
+    if (c >= '1' && c <= '9')
+        return c - '1';
+    if (c == '0')
+        return 9;
+    if (c >= 'a' && c <= 'z')
+        return 10 + c - 'a';
+    if (c >= 'A' && c <= 'Z')
+        return 10 + c - 'A';
+
+    return -1;
 }
 
 struct SHyprGradientSpec {
@@ -385,6 +457,49 @@ static SP<Render::ITexture> renderNumberTexture(const std::string& text, const C
 
 static void damageMonitor(WP<Hyprutils::Animation::CBaseAnimatedVariable> thisptr) {
     g_pOverview->damage();
+}
+
+struct SWorkspacePreviewState {
+    bool     visible        = false;
+    bool     forceRendering = false;
+    float    alphaValue     = 1.F;
+    float    alphaGoal      = 1.F;
+    Vector2D offsetValue;
+    Vector2D offsetGoal;
+};
+
+static SWorkspacePreviewState applyWorkspacePreviewState(const PHLWORKSPACE& workspace) {
+    SWorkspacePreviewState state;
+    if (!workspace)
+        return state;
+
+    state.visible        = workspace->m_visible;
+    state.forceRendering = workspace->m_forceRendering;
+    state.alphaValue     = workspace->m_alpha->value();
+    state.alphaGoal      = workspace->m_alpha->goal();
+    state.offsetValue    = workspace->m_renderOffset->value();
+    state.offsetGoal     = workspace->m_renderOffset->goal();
+
+    workspace->m_visible        = true;
+    workspace->m_forceRendering = true;
+    workspace->m_alpha->setValueAndWarp(1.F);
+    *workspace->m_alpha = 1.F;
+    workspace->m_renderOffset->setValueAndWarp(Vector2D{});
+    *workspace->m_renderOffset = Vector2D{};
+
+    return state;
+}
+
+static void restoreWorkspacePreviewState(const PHLWORKSPACE& workspace, const SWorkspacePreviewState& state) {
+    if (!workspace)
+        return;
+
+    workspace->m_visible        = state.visible;
+    workspace->m_forceRendering = state.forceRendering;
+    workspace->m_alpha->setValueAndWarp(state.alphaValue);
+    *workspace->m_alpha = state.alphaGoal;
+    workspace->m_renderOffset->setValueAndWarp(state.offsetValue);
+    *workspace->m_renderOffset = state.offsetGoal;
 }
 
 static void removeOverview(WP<Hyprutils::Animation::CBaseAnimatedVariable> thisptr) {
@@ -636,16 +751,14 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
         if (PWORKSPACE) {
             image.pWorkspace            = PWORKSPACE;
             PMONITOR->m_activeWorkspace = PWORKSPACE;
-            g_pDesktopAnimationManager->startAnimation(PWORKSPACE, CDesktopAnimationManager::ANIMATION_TYPE_IN, true, true);
-            PWORKSPACE->m_visible = true;
+            const auto previewState     = applyWorkspacePreviewState(PWORKSPACE);
 
             if (PWORKSPACE == startedOn)
                 PMONITOR->m_activeSpecialWorkspace = openSpecial;
 
             g_pHyprRenderer->renderWorkspace(PMONITOR, PWORKSPACE, Time::steadyNow(), monbox);
 
-            PWORKSPACE->m_visible = false;
-            g_pDesktopAnimationManager->startAnimation(PWORKSPACE, CDesktopAnimationManager::ANIMATION_TYPE_OUT, false, true);
+            restoreWorkspacePreviewState(PWORKSPACE, previewState);
 
             if (PWORKSPACE == startedOn)
                 PMONITOR->m_activeSpecialWorkspace.reset();
@@ -773,8 +886,8 @@ void COverview::selectHoveredWorkspace() {
         return;
 
     // get tile x,y
-    int x     = lastMousePosLocal.x / pMonitor->m_size.x * SIDE_LENGTH;
-    int y     = lastMousePosLocal.y / pMonitor->m_size.y * SIDE_LENGTH;
+    int x     = std::clamp((int)(lastMousePosLocal.x / pMonitor->m_size.x * SIDE_LENGTH), 0, SIDE_LENGTH - 1);
+    int y     = std::clamp((int)(lastMousePosLocal.y / pMonitor->m_size.y * SIDE_LENGTH), 0, SIDE_LENGTH - 1);
     closeOnID = x + y * SIDE_LENGTH;
 }
 
@@ -823,6 +936,46 @@ int COverview::tileForVisibleIndex(int vIdx) const {
         ++seen;
     }
     return -1;
+}
+
+bool COverview::selectVisibleToken(const std::string& token) {
+    if (closing)
+        return false;
+
+    static auto* const* PSELECTLABEL = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:selection_label_enable")->getDataStaticPtr();
+    static auto const*  PSELECTMAP   = (Hyprlang::STRING const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:selection_label_token_map")->getDataStaticPtr();
+
+    const std::string normalized = lowerString(trimString(token));
+    if (normalized.empty())
+        return false;
+
+    if (**PSELECTLABEL) {
+        const auto tokens = splitCommaList(std::string{*PSELECTMAP});
+        for (size_t i = 0; i < tokens.size(); ++i) {
+            if (tokens[i].empty() || lowerString(tokens[i]) != normalized)
+                continue;
+
+            const int tid = tileForVisibleIndex(i);
+            if (tid == -1)
+                return false;
+
+            closeOnID = tid;
+            return true;
+        }
+
+        return false;
+    }
+
+    const int visibleIndex = fallbackTokenToVisibleIndex(normalized);
+    if (visibleIndex < 0)
+        return false;
+
+    const int tid = tileForVisibleIndex(visibleIndex);
+    if (tid == -1)
+        return false;
+
+    closeOnID = tid;
+    return true;
 }
 
 void COverview::moveFocus(int dx, int dy) {
@@ -957,7 +1110,7 @@ void COverview::redrawID(int id, bool forcelowres) {
 
     Render::GL::g_pHyprOpenGL->makeEGLCurrent();
 
-    id = std::clamp(id, 0, SIDE_LENGTH * SIDE_LENGTH);
+    id = std::clamp(id, 0, SIDE_LENGTH * SIDE_LENGTH - 1);
 
     Vector2D tileSize       = pMonitor->m_size / SIDE_LENGTH;
     Vector2D tileRenderSize = (pMonitor->m_size - Vector2D{GAP_WIDTH, GAP_WIDTH} * (SIDE_LENGTH - 1)) / SIDE_LENGTH;
@@ -1007,16 +1160,14 @@ void COverview::redrawID(int id, bool forcelowres) {
 
     if (PWORKSPACE) {
         pMonitor->m_activeWorkspace = PWORKSPACE;
-        g_pDesktopAnimationManager->startAnimation(PWORKSPACE, CDesktopAnimationManager::ANIMATION_TYPE_IN, true, true);
-        PWORKSPACE->m_visible = true;
+        const auto previewState     = applyWorkspacePreviewState(PWORKSPACE);
 
         if (PWORKSPACE == startedOn)
             pMonitor->m_activeSpecialWorkspace = openSpecial;
 
         g_pHyprRenderer->renderWorkspace(pMonitor.lock(), PWORKSPACE, Time::steadyNow(), monbox);
 
-        PWORKSPACE->m_visible = false;
-        g_pDesktopAnimationManager->startAnimation(PWORKSPACE, CDesktopAnimationManager::ANIMATION_TYPE_OUT, false, true);
+        restoreWorkspacePreviewState(PWORKSPACE, previewState);
 
         if (PWORKSPACE == startedOn)
             pMonitor->m_activeSpecialWorkspace.reset();
@@ -1074,7 +1225,7 @@ void COverview::onDamageReported() {
     g_pCompositor->scheduleFrameForMonitor(pMonitor.lock());
 }
 
-void COverview::close() {
+void COverview::close(bool switchToSelection) {
     if (closing)
         return;
 
@@ -1082,12 +1233,13 @@ void COverview::close() {
 
     const int   ID = closeOnID == -1 ? openedID : closeOnID;
 
-    const auto& TILE = images[std::clamp(ID, 0, SIDE_LENGTH * SIDE_LENGTH)];
+    const int   SAFEID = std::clamp(ID, 0, SIDE_LENGTH * SIDE_LENGTH - 1);
+    const auto& TILE   = images[SAFEID];
 
     Vector2D    tileSize = (pMonitor->m_size / SIDE_LENGTH);
 
     *size = pMonitor->m_size * pMonitor->m_size / tileSize;
-    *pos  = (-((pMonitor->m_size / (double)SIDE_LENGTH) * Vector2D{ID % SIDE_LENGTH, ID / SIDE_LENGTH}) * pMonitor->m_scale) * (pMonitor->m_size / tileSize);
+    *pos  = (-((pMonitor->m_size / (double)SIDE_LENGTH) * Vector2D{SAFEID % SIDE_LENGTH, SAFEID / SIDE_LENGTH}) * pMonitor->m_scale) * (pMonitor->m_size / tileSize);
 
     size->setCallbackOnEnd(removeOverview);
 
@@ -1095,7 +1247,7 @@ void COverview::close() {
 
     redrawAll();
 
-    if (TILE.workspaceID != pMonitor->activeWorkspaceID()) {
+    if (switchToSelection && TILE.workspaceID != pMonitor->activeWorkspaceID()) {
         pMonitor->setSpecialWorkspace(0);
 
         // If this tile's workspace was WORKSPACE_INVALID, move to the next
@@ -1237,8 +1389,15 @@ void COverview::fullRender() {
     static auto  const* PBGREFOC     = (Hyprlang::STRING const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:border_grad_focus")->getDataStaticPtr();
     static auto  const* PBGREHOV     = (Hyprlang::STRING const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:border_grad_hover")->getDataStaticPtr();
 
+    static auto* const* PSELECTEN   = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:selection_label_enable")->getDataStaticPtr();
+    static auto  const* PSELECTMAP  = (Hyprlang::STRING const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:selection_label_token_map")->getDataStaticPtr();
+    static auto  const* PSELECTPOS  = (Hyprlang::STRING const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:selection_label_position")->getDataStaticPtr();
+    static auto* const* PSELECTOX   = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:selection_label_offset_x")->getDataStaticPtr();
+    static auto* const* PSELECTOY   = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:selection_label_offset_y")->getDataStaticPtr();
+    static auto* const* PSELECTCOL  = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:selection_label_color")->getDataStaticPtr();
+
     // draw labels
-    if (**PLABELEN) {
+    if (**PLABELEN || **PSELECTEN) {
         // use the tracked hoveredID (cleared during closing)
         const int labelHoveredID = closing ? -1 : hoveredID;
 
@@ -1273,22 +1432,80 @@ void COverview::fullRender() {
             return 0;     // default
         };
 
-        auto placeBox = [&](const CBox& tile, const Vector2D& size) -> CBox {
+        auto placeBox = [&](const CBox& tile, const Vector2D& size, const std::string& anchor, int offsetX, int offsetY) -> CBox {
             double x = tile.x, y = tile.y;
-            const std::string pos{*PLABELPOS};
-            if (pos == "top-left") {
-                x += **PLABELOX; y += **PLABELOY;
-            } else if (pos == "top-right") {
-                x += tile.w - size.x - **PLABELOX; y += **PLABELOY;
-            } else if (pos == "bottom-left") {
-                x += **PLABELOX; y += tile.h - size.y - **PLABELOY;
-            } else if (pos == "bottom-right") {
-                x += tile.w - size.x - **PLABELOX; y += tile.h - size.y - **PLABELOY;
+            if (anchor == "top-left") {
+                x += offsetX; y += offsetY;
+            } else if (anchor == "top-right") {
+                x += tile.w - size.x - offsetX; y += offsetY;
+            } else if (anchor == "bottom-left") {
+                x += offsetX; y += tile.h - size.y - offsetY;
+            } else if (anchor == "bottom-right") {
+                x += tile.w - size.x - offsetX; y += tile.h - size.y - offsetY;
             } else { // center
                 x += (tile.w - size.x) / 2.0; y += (tile.h - size.y) / 2.0;
             }
             return CBox{x, y, (double)size.x, (double)size.y};
         };
+
+        auto renderLabel = [&](SP<Render::ITexture>& tex, Vector2D& sz, const std::string& label, const CHyprColor& col, float scaleMul, const CBox& tile, const std::string& anchor,
+                               int offsetX, int offsetY) {
+            if (label.empty())
+                return;
+
+            const int baseF = std::max(8, (int)**PLABELSIZE);
+            if (!tex || tex->m_texID == 0) {
+                const int fsz = std::max(8, (int)std::round(baseF * scaleMul));
+                Vector2D  buf{std::max(32, fsz * 2), std::max(24, fsz + 8)};
+                sz  = buf;
+                tex = renderNumberTexture(label, col, buf, pMonitor->m_scale, fsz);
+            }
+
+            if (!tex || tex->m_texID == 0)
+                return;
+
+            static auto* const* PLPIXELSNAP = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:label_pixel_snap")->getDataStaticPtr();
+
+            auto drawWithBG = [&]() {
+                const int pad = **PLBGPAD;
+                Vector2D  bgSize = {sz.x + pad * 2, sz.y + pad * 2};
+                const std::string shape{*PLBGSHAPE};
+                int roundPx = **PLBGROUND;
+                if (shape == "circle" || shape == "square") {
+                    const double side = std::max(bgSize.x, bgSize.y);
+                    bgSize            = {side, side};
+                    roundPx           = (shape == "circle") ? std::lround(side / 2.0) : 0;
+                }
+                CBox bg = placeBox(tile, bgSize, anchor, offsetX, offsetY);
+                CBox lb{bg.x + (bg.w - sz.x) / 2.0, bg.y + (bg.h - sz.y) / 2.0, (double)sz.x, (double)sz.y};
+                if (**PLPIXELSNAP) {
+                    bg.round();
+                    lb.round();
+                }
+                Render::GL::g_pHyprOpenGL->renderRect(bg, CHyprColor{(uint64_t)**PLBGCOL}, {.round = roundPx});
+                Render::GL::g_pHyprOpenGL->renderTexture(tex, lb, {.a = 1.0});
+            };
+
+            auto drawNoBG = [&]() {
+                CBox lb = placeBox(tile, sz, anchor, offsetX, offsetY);
+                if (**PLPIXELSNAP)
+                    lb.round();
+                Render::GL::g_pHyprOpenGL->renderTexture(tex, lb, {.a = 1.0});
+            };
+
+            if (**PLBGEN)
+                drawWithBG();
+            else
+                drawNoBG();
+        };
+
+        std::vector<std::string> labelTokens;
+        if (!std::string{*PTOKENMAP}.empty())
+            labelTokens = splitCommaList(std::string{*PTOKENMAP});
+
+        std::vector<std::string> selectionTokens;
+        if (!std::string{*PSELECTMAP}.empty())
+            selectionTokens = splitCommaList(std::string{*PSELECTMAP});
 
         int tokenCounter = 0;
         for (size_t y = 0; y < (size_t)SIDE_LENGTH; ++y) {
@@ -1302,124 +1519,37 @@ void COverview::fullRender() {
                 tile.scale(pMonitor->m_scale).translate(pos->value());
                 tile.round();
 
-                std::string label;
-                const std::string mode{*PLABELMODE};
-                if (mode == "token") {
-                    // override map (comma-separated) up to 50
-                    std::vector<std::string> tokens;
-                    if (!std::string{*PTOKENMAP}.empty()) {
-                        const std::string mapStr{*PTOKENMAP};
-                        size_t            start = 0;
-                        for (size_t cur = 0; cur <= mapStr.size(); ++cur) {
-                            if (cur == mapStr.size() || mapStr[cur] == ',') {
-                                std::string t = mapStr.substr(start, cur - start);
-                                while (!t.empty() && std::isspace((unsigned char)t.front())) t.erase(t.begin());
-                                while (!t.empty() && std::isspace((unsigned char)t.back())) t.pop_back();
-                                tokens.push_back(t);
-                                start = cur + 1;
-                            }
-                        }
+                if (**PLABELEN && shouldShow(id)) {
+                    std::string label;
+                    const std::string mode{*PLABELMODE};
+                    if (mode == "token") {
+                        if (tokenCounter < (int)labelTokens.size() && !labelTokens[tokenCounter].empty())
+                            label = labelTokens[tokenCounter];
+                        else
+                            label = fallbackTokenForVisibleIndex(tokenCounter);
+                    } else if (mode == "index") {
+                        label = std::to_string(tokenCounter + 1);
+                    } else {
+                        label = std::to_string(images[id].workspaceID);
                     }
 
-                    const int k = tokenCounter; // 0-based visible index
-                    if (k < (int)tokens.size() && !tokens[k].empty())
-                        label = tokens[k];
-                    else {
-                        if (k <= 8) label = std::to_string(k + 1);       // 1..9
-                        else if (k == 9) label = "0";                   // 10 -> 0
-                        else if (k >= 10 && k <= 19) {                   // 11..20
-                            static const char* SYM[10] = {"!","@","#","$","%","^","&","*","(",")"};
-                            label = SYM[k - 10];
-                        } else if (k >= 20 && k <= 45) {
-                            label = std::string(1, char('a' + (k - 20))); // 21..46 -> a..z
-                        } else {
-                            label = ""; // 47..50 blank by default
-                        }
+                    const int st = resolveState(id);
+                    if (!label.empty()) {
+                        if (st == 1)
+                            renderLabel(images[id].labelTexHover, images[id].labelSizeHover, label, CHyprColor{(uint64_t)**PLCOLHOV}, **PLSCALEH, tile, std::string{*PLABELPOS}, **PLABELOX, **PLABELOY);
+                        else if (st == 2)
+                            renderLabel(images[id].labelTexFocus, images[id].labelSizeFocus, label, CHyprColor{(uint64_t)**PLCOLFOC}, **PLSCALEF, tile, std::string{*PLABELPOS}, **PLABELOX, **PLABELOY);
+                        else if (st == 3)
+                            renderLabel(images[id].labelTexCurrent, images[id].labelSizeCurrent, label, CHyprColor{(uint64_t)**PLCOLCUR}, 1.0f, tile, std::string{*PLABELPOS}, **PLABELOX, **PLABELOY);
+                        else
+                            renderLabel(images[id].labelTexDefault, images[id].labelSizeDefault, label, CHyprColor{(uint64_t)**PLCOLDEF}, 1.0f, tile, std::string{*PLABELPOS}, **PLABELOX, **PLABELOY);
                     }
-                } else if (mode == "index") {
-                    label = std::to_string(tokenCounter + 1);
-                } else {
-                    label = std::to_string(images[id].workspaceID);
                 }
-                const int         baseF = std::max(8, (int)**PLABELSIZE);
-                const int         st    = resolveState(id);
 
-                auto ensureTex = [&](SP<Render::ITexture>& tex, Vector2D& sz, const CHyprColor& col, float scaleMul) {
-                    if (!tex || tex->m_texID == 0) {
-                        const int fsz = std::max(8, (int)std::round(baseF * scaleMul));
-                        Vector2D  buf{std::max(32, fsz * 2), std::max(24, fsz + 8)};
-                        sz  = buf;
-                        tex = renderNumberTexture(label, col, buf, pMonitor->m_scale, fsz);
-                    }
-                };
+                if (**PSELECTEN && tokenCounter < (int)selectionTokens.size() && !selectionTokens[tokenCounter].empty())
+                    renderLabel(images[id].selectionLabelTex, images[id].selectionLabelSize, selectionTokens[tokenCounter], CHyprColor{(uint64_t)**PSELECTCOL}, 1.0f, tile,
+                                std::string{*PSELECTPOS}, **PSELECTOX, **PSELECTOY);
 
-                // if label isn't shown per mode or label is empty, still advance token index
-                if (!shouldShow(id) || label.empty()) { tokenCounter++; continue; }
-
-                CHyprColor col = CHyprColor{(uint64_t)**PLCOLDEF};
-                float      scl = 1.0f;
-                static auto* const* PLPIXELSNAP = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:label_pixel_snap")->getDataStaticPtr();
-
-                auto drawWithBG = [&](SP<Render::ITexture>& tex, const Vector2D& tsize) {
-                    const int pad = **PLBGPAD;
-                    // background size
-                    Vector2D bgSize = {tsize.x + pad * 2, tsize.y + pad * 2};
-                    const std::string shape{*PLBGSHAPE};
-                    int roundPx = **PLBGROUND;
-                    if (shape == "circle" || shape == "square") {
-                        const double side = std::max(bgSize.x, bgSize.y);
-                        bgSize            = {side, side};
-                        roundPx           = (shape == "circle") ? std::lround(side / 2.0) : 0;
-                    }
-                    CBox bg = placeBox(tile, bgSize);
-                    // center text within bg
-                    CBox lb{bg.x + (bg.w - tsize.x) / 2.0, bg.y + (bg.h - tsize.y) / 2.0, (double)tsize.x, (double)tsize.y};
-                    if (**PLPIXELSNAP) {
-                        bg.round();
-                        lb.round();
-                    }
-                    // draw
-                    Render::GL::g_pHyprOpenGL->renderRect(bg, CHyprColor{(uint64_t)**PLBGCOL}, {.round = roundPx});
-                    Render::GL::g_pHyprOpenGL->renderTexture(tex, lb, {.a = 1.0});
-                };
-
-                auto drawNoBG = [&](SP<Render::ITexture>& tex, const Vector2D& tsize) {
-                    CBox lb = placeBox(tile, tsize);
-                    if (**PLPIXELSNAP)
-                        lb.round();
-                    Render::GL::g_pHyprOpenGL->renderTexture(tex, lb, {.a = 1.0});
-                };
-
-                if (st == 1) { // hover
-                    col = CHyprColor{(uint64_t)**PLCOLHOV};
-                    scl = **PLSCALEH;
-                    ensureTex(images[id].labelTexHover, images[id].labelSizeHover, col, scl);
-                    if (**PLBGEN)
-                        drawWithBG(images[id].labelTexHover, images[id].labelSizeHover);
-                    else
-                        drawNoBG(images[id].labelTexHover, images[id].labelSizeHover);
-                } else if (st == 2) { // focus
-                    col = CHyprColor{(uint64_t)**PLCOLFOC};
-                    scl = **PLSCALEF;
-                    ensureTex(images[id].labelTexFocus, images[id].labelSizeFocus, col, scl);
-                    if (**PLBGEN)
-                        drawWithBG(images[id].labelTexFocus, images[id].labelSizeFocus);
-                    else
-                        drawNoBG(images[id].labelTexFocus, images[id].labelSizeFocus);
-                } else if (st == 3) { // current
-                    col = CHyprColor{(uint64_t)**PLCOLCUR};
-                    ensureTex(images[id].labelTexCurrent, images[id].labelSizeCurrent, col, 1.0f);
-                    if (**PLBGEN)
-                        drawWithBG(images[id].labelTexCurrent, images[id].labelSizeCurrent);
-                    else
-                        drawNoBG(images[id].labelTexCurrent, images[id].labelSizeCurrent);
-                } else { // default
-                    ensureTex(images[id].labelTexDefault, images[id].labelSizeDefault, CHyprColor{(uint64_t)**PLCOLDEF}, 1.0f);
-                    if (**PLBGEN)
-                        drawWithBG(images[id].labelTexDefault, images[id].labelSizeDefault);
-                    else
-                        drawNoBG(images[id].labelTexDefault, images[id].labelSizeDefault);
-                }
                 tokenCounter++;
             }
         }

@@ -47,6 +47,7 @@ plugin {
                                           # Per-monitor: DP-1 first 1, HDMI-1 center current
 
         gesture_distance = 200 # how far is the "max" for the gesture
+        cancel_key = escape # comma-separated key names; none/off disables
         gaps_out = 0 # outer margin (px)
     }
 }
@@ -110,8 +111,16 @@ plugin {
         label_text_underline = 0
         label_text_strikethrough = 0
         label_pixel_snap = 1
-        # optional: override tokens (up to 50, comma-separated). Empty entries allowed.
-        # label_token_map = "1,2,3,4,5,6,7,8,9,0,!,@,#,$,%,^,&,*,(,),a,b,c,..."
+        # optional: override tokens (comma-separated). Empty entries allowed.
+        # label_token_map = "1,2,3,4,5,6,7,8,9,0,a,b,c,..."
+
+        # optional: separate visible tokens for hyprexpo:kb_select
+        selection_label_enable = 0
+        selection_label_token_map = a,s,d,f,g,q,w,e,r,t,z,x,c,v,b
+        selection_label_position = top-right
+        selection_label_offset_x = 6
+        selection_label_offset_y = 6
+        selection_label_color = rgb(ffcc66)
     }
 }
 ```
@@ -129,6 +138,7 @@ plugin {
 | `plugin:hyprexpo:workspace_method` | string | placement: `center current` or `first <ws>` | `center current` |
 | `plugin:hyprexpo:skip_empty` | bool (int) | skip empty workspaces using selector `m` (`1`) or show all with `r` (`0`) | `0` |
 | `plugin:hyprexpo:gesture_distance` | int | swipe distance considered "max" (px) | `200` |
+| `plugin:hyprexpo:cancel_key` | string | comma-separated key names that close overview without selecting; `none`/`off` disables | `escape` |
 
 ### Tile Appearance
 
@@ -155,7 +165,7 @@ plugin {
 | --- | --- | --- | --- |
 | `plugin:hyprexpo:label_enable` | bool (int) | enable workspace labels | `1` |
 | `plugin:hyprexpo:label_text_mode` | string | content: `token` (1,2..9,0,a-z), `index` (visual order), `id` (workspace ID) | `token` |
-| `plugin:hyprexpo:label_token_map` | string | override up to 50 tokens (comma-sep), e.g. `1,2,3,,,6` (empty entries skip) | empty |
+| `plugin:hyprexpo:label_token_map` | string | override tokens by visible tile order (comma-sep), e.g. `1,2,3,,,6` (empty entries skip) | empty |
 | `plugin:hyprexpo:label_position` | string | anchor: `top-left` \| `top-right` \| `bottom-left` \| `bottom-right` \| `center` | `center` |
 | `plugin:hyprexpo:label_offset_x` | int | horizontal offset from anchor (px) | `0` |
 | `plugin:hyprexpo:label_offset_y` | int | vertical offset from anchor (px) | `0` |
@@ -181,6 +191,19 @@ plugin {
 | `plugin:hyprexpo:label_bg_color` | color | bubble background color | `rgba(00000088)` |
 | `plugin:hyprexpo:label_padding` | int | bubble padding around text (px) | `8` |
 
+### Selection Labels
+
+Selection labels are optional overlays used only by `hyprexpo:kb_select`. They let visible workspace labels stay stable while selection tokens use a separate map.
+
+| key | type | description | default |
+| --- | --- | --- | --- |
+| `plugin:hyprexpo:selection_label_enable` | bool (int) | enable the separate selection-token overlay and token map | `0` |
+| `plugin:hyprexpo:selection_label_token_map` | string | comma-separated tokens by visible tile order; empty entries skip | `a,s,d,f,g,q,w,e,r,t,z,x,c,v,b` |
+| `plugin:hyprexpo:selection_label_position` | string | anchor: `top-left` \| `top-right` \| `bottom-left` \| `bottom-right` \| `center` | `top-right` |
+| `plugin:hyprexpo:selection_label_offset_x` | int | horizontal offset from anchor (px) | `6` |
+| `plugin:hyprexpo:selection_label_offset_y` | int | vertical offset from anchor (px) | `6` |
+| `plugin:hyprexpo:selection_label_color` | color | selection-token text color | `rgb(ffcc66)` |
+
 ### Keyboard Navigation
 
 | key | type | description | default |
@@ -205,6 +228,7 @@ bind = SUPER, g, hyprexpo:expo, <option>
 | `toggle` | show overview if hidden, hide if shown |
 | `on` / `enable` | show overview |
 | `off` / `disable` | hide overview |
+| `cancel` | hide overview without switching workspaces |
 | `select` | select the hovered workspace |
 
 **Keyboard navigation dispatchers** (active during overview):
@@ -215,7 +239,7 @@ bind = SUPER, g, hyprexpo:expo, <option>
 | `hyprexpo:kb_confirm` | none | select the focused tile |
 | `hyprexpo:kb_selecti` | `<index>` | select by 1-based visual index (1-46) |
 | `hyprexpo:kb_selectn` | `<id>` | select by workspace ID (legacy, 0→10) |
-| `hyprexpo:kb_select` | `<token>` | select by single token (1-9, 0, a-z) |
+| `hyprexpo:kb_select` | `<token>` | select by token (fallback: 1-9, 0, a-z; selection-label map when enabled) |
 
 ### Lua API
 
@@ -224,12 +248,18 @@ When Hyprland is configured from Lua, the dispatchers are also available under
 
 ```lua
 hl.plugin.hyprexpo.expo("toggle")
+hl.plugin.hyprexpo.expo("cancel")
 hl.plugin.hyprexpo.kb_focus("left")
 hl.plugin.hyprexpo.kb_confirm()
 hl.plugin.hyprexpo.kb_selecti(1)
 hl.plugin.hyprexpo.kb_selectn(1)
 hl.plugin.hyprexpo.kb_select("1")
 ```
+
+Lua wrappers validate argument types strictly: `expo`, `kb_focus`, and
+`kb_select` take strings; `kb_selecti` and `kb_selectn` take Lua integers or
+exact integer strings. Fractional numbers and partial numeric strings are
+rejected.
 
 ### Example Bindings
 

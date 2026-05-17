@@ -45,3 +45,7 @@ result-man
 test_*.cpp
 test_version
 test_hash
+
+# Planning files
+.planning/*
+.omx/*

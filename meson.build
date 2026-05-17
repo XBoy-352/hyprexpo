@@ -33,6 +33,7 @@ shared_module(meson.project_name(), src,
     dependency('libudev'),
     dependency('wayland-server'),
     dependency('xkbcommon'),
+    dependency('lua5.4'),
   ],
   install: true,
 )

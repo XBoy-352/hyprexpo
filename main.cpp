@@ -5,6 +5,7 @@
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
+#include <hyprland/src/config/values/types/ColorValue.hpp>
 #include <hyprland/src/config/values/types/FloatValue.hpp>
 #include <hyprland/src/config/values/types/IntValue.hpp>
 #include <hyprland/src/config/values/types/StringValue.hpp>
@@ -12,13 +13,16 @@
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/managers/input/trackpad/GestureTypes.hpp>
 #include <hyprland/src/managers/input/trackpad/TrackpadGestures.hpp>
+#include <hyprland/src/managers/SeatManager.hpp>
 
 #include <hyprutils/string/ConstVarList.hpp>
 #include <lua.hpp>
+#include <xkbcommon/xkbcommon.h>
 using namespace Hyprutils::String;
 
+#include <algorithm>
+#include <charconv>
 #include <cctype>
-#include <optional>
 
 #include "globals.hpp"
 #include "overview.hpp"
@@ -50,6 +54,91 @@ static SDispatchResult onKbSelectNumberDispatcher(std::string arg);
 static SDispatchResult onKbSelectTokenDispatcher(std::string arg);
 static SDispatchResult onKbSelectIndexDispatcher(std::string arg);
 
+static std::string trimString(std::string value) {
+    while (!value.empty() && std::isspace((unsigned char)value.front()))
+        value.erase(value.begin());
+    while (!value.empty() && std::isspace((unsigned char)value.back()))
+        value.pop_back();
+    return value;
+}
+
+static std::string lowerString(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return std::tolower(c); });
+    return value;
+}
+
+static bool parseStrictInteger(const std::string& value, int& out) {
+    const std::string trimmed = trimString(value);
+    if (trimmed.empty())
+        return false;
+
+    const char* begin = trimmed.data();
+    const char* end   = begin + trimmed.size();
+    int         parsed = 0;
+    const auto  result = std::from_chars(begin, end, parsed);
+    if (result.ec != std::errc{} || result.ptr != end)
+        return false;
+
+    out = parsed;
+    return true;
+}
+
+static bool isCancelKeyDisabled(const std::string& keyName) {
+    const std::string key = lowerString(keyName);
+    return key.empty() || key == "none" || key == "disabled" || key == "disable" || key == "off";
+}
+
+static bool keyNameMatchesKeysym(const std::string& keyName, xkb_keysym_t keysym) {
+    if (keyName.empty())
+        return false;
+
+    const auto configuredKeysym = xkb_keysym_from_name(keyName.c_str(), XKB_KEYSYM_CASE_INSENSITIVE);
+    if (configuredKeysym == XKB_KEY_NoSymbol)
+        return false;
+
+    return xkb_keysym_to_lower(keysym) == xkb_keysym_to_lower(configuredKeysym);
+}
+
+static bool matchesCancelKey(xkb_keysym_t keysym) {
+    static auto const* PCANCELKEY = (Hyprlang::STRING const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:cancel_key")->getDataStaticPtr();
+
+    std::string keyConfig = *PCANCELKEY;
+    size_t      start     = 0;
+
+    while (start <= keyConfig.size()) {
+        size_t comma = keyConfig.find(',', start);
+        if (comma == std::string::npos)
+            comma = keyConfig.size();
+
+        const std::string keyName = trimString(keyConfig.substr(start, comma - start));
+        if (isCancelKeyDisabled(keyName))
+            return false;
+        if (keyNameMatchesKeysym(keyName, keysym))
+            return true;
+
+        if (comma == keyConfig.size())
+            break;
+        start = comma + 1;
+    }
+
+    return false;
+}
+
+static bool shouldCancelOverview(const IKeyboard::SKeyEvent& event) {
+    if (!g_pOverview || event.state != WL_KEYBOARD_KEY_STATE_PRESSED)
+        return false;
+
+    const auto KEYCODE  = event.keycode + 8;
+    const auto KEYBOARD = g_pSeatManager->m_keyboard.lock();
+
+    if (KEYBOARD && KEYBOARD->m_xkbState && matchesCancelKey(xkb_state_key_get_one_sym(KEYBOARD->m_xkbState, KEYCODE)))
+        return true;
+    if (KEYBOARD && KEYBOARD->m_xkbSymState && matchesCancelKey(xkb_state_key_get_one_sym(KEYBOARD->m_xkbSymState, KEYCODE)))
+        return true;
+
+    return false;
+}
+
 static int luaDispatchResult(lua_State* L, const char* name, const SDispatchResult& result) {
     if (result.success)
         return 0;
@@ -61,14 +150,39 @@ static std::string luaStringArg(lua_State* L, int index, const char* name, const
     if (lua_gettop(L) < index || lua_isnil(L, index))
         return defaultValue;
 
-    if (lua_isnumber(L, index))
-        return std::to_string(lua_tointeger(L, index));
-
-    if (lua_isstring(L, index))
+    if (lua_type(L, index) == LUA_TSTRING)
         return lua_tostring(L, index);
 
-    luaL_error(L, "%s: argument %d must be a string or integer", name, index);
+    luaL_error(L, "%s: argument %d must be a string", name, index);
     return defaultValue;
+}
+
+static std::string luaIntegerArg(lua_State* L, int index, const char* name) {
+    if (lua_gettop(L) < index || lua_isnil(L, index)) {
+        luaL_error(L, "%s: argument %d must be an integer", name, index);
+        return "";
+    }
+
+    if (lua_type(L, index) == LUA_TNUMBER) {
+        if (!lua_isinteger(L, index)) {
+            luaL_error(L, "%s: argument %d must be an integer, not a fractional number", name, index);
+            return "";
+        }
+        return std::to_string(lua_tointeger(L, index));
+    }
+
+    if (lua_type(L, index) == LUA_TSTRING) {
+        int parsed = 0;
+        const std::string value = lua_tostring(L, index);
+        if (!parseStrictInteger(value, parsed)) {
+            luaL_error(L, "%s: argument %d must be an integer string", name, index);
+            return "";
+        }
+        return trimString(value);
+    }
+
+    luaL_error(L, "%s: argument %d must be an integer", name, index);
+    return "";
 }
 
 static int luaExpo(lua_State* L) {
@@ -84,7 +198,7 @@ static int luaKbConfirm(lua_State* L) {
 }
 
 static int luaKbSelectNumber(lua_State* L) {
-    return luaDispatchResult(L, "hyprexpo.kb_selectn", onKbSelectNumberDispatcher(luaStringArg(L, 1, "hyprexpo.kb_selectn")));
+    return luaDispatchResult(L, "hyprexpo.kb_selectn", onKbSelectNumberDispatcher(luaIntegerArg(L, 1, "hyprexpo.kb_selectn")));
 }
 
 static int luaKbSelectToken(lua_State* L) {
@@ -92,7 +206,7 @@ static int luaKbSelectToken(lua_State* L) {
 }
 
 static int luaKbSelectIndex(lua_State* L) {
-    return luaDispatchResult(L, "hyprexpo.kb_selecti", onKbSelectIndexDispatcher(luaStringArg(L, 1, "hyprexpo.kb_selecti")));
+    return luaDispatchResult(L, "hyprexpo.kb_selecti", onKbSelectIndexDispatcher(luaIntegerArg(L, 1, "hyprexpo.kb_selecti")));
 }
 
 //
@@ -145,6 +259,12 @@ static SDispatchResult onExpoDispatcher(std::string arg) {
             g_pOverview       = std::make_unique<COverview>(g_pCompositor->getMonitorFromCursor()->m_activeWorkspace);
             renderingOverview = false;
         }
+        return {};
+    }
+
+    if (arg == "cancel") {
+        if (g_pOverview)
+            g_pOverview->close(false);
         return {};
     }
 
@@ -339,6 +459,14 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         g_pOverview->onPreRender();
     });
 
+    static auto PKEY = Event::bus()->m_events.input.keyboard.key.listen([](IKeyboard::SKeyEvent event, Event::SCallbackInfo& info) {
+        if (!shouldCancelOverview(event))
+            return;
+
+        info.cancelled = true;
+        g_pOverview->close(false);
+    });
+
     HyprlandAPI::addDispatcherV2(PHANDLE, "hyprexpo:expo", ::onExpoDispatcher);
 
     // keyboard navigation dispatchers
@@ -360,7 +488,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:columns", "columns", 3));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:gaps_in", "inner gaps", 5));
-    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:bg_col", "background color", 0xFF111111));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:bg_col", "background color", 0xFF111111));
     // Supports both global and per-monitor formats:
     // Global: "center current" or "first 1"
     // Per-monitor with comma delimiter: "DP-1 first 1, HDMI-1 center current"
@@ -370,6 +498,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:skip_empty", "skip empty workspaces", 0));
 
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:gesture_distance", "gesture distance", 200));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:cancel_key", "cancel key", "escape"));
 
     // keyboard navigation + styling
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:keynav_enable", "key navigation enable", 1));
@@ -384,7 +513,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // Deprecated but supported for backwards compatibility
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:border_style", "border style", "simple"));     // ignored, auto-detected from format
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:label_enable", "label enable", 1));
-    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:label_color", "label color", 0xFFFFFFFF));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:label_color", "label color", 0xFFFFFFFF));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:label_font_size", "label font size", 16));
     // label_text_mode: token (default) | id | index
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:label_text_mode", "label text mode", "token"));
@@ -404,15 +533,21 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:label_position", "label position", "center"));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:label_offset_x", "label offset x", 0));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:label_offset_y", "label offset y", 0));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:selection_label_enable", "selection label enable", 0));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:selection_label_token_map", "selection label token map", "a,s,d,f,g,q,w,e,r,t,z,x,c,v,b"));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:selection_label_position", "selection label position", "top-right"));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:selection_label_offset_x", "selection label offset x", 6));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:selection_label_offset_y", "selection label offset y", 6));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:selection_label_color", "selection label color", 0xFFFFCC66));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:label_show", "label show", "always"));
-    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:label_color_default", "default label color", 0xFFFFFFFF));
-    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:label_color_hover", "hover label color", 0xFFEEEEEE));
-    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:label_color_focus", "focus label color", 0xFFFFCC66));
-    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:label_color_current", "current label color", 0xFF66CCFF));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:label_color_default", "default label color", 0xFFFFFFFF));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:label_color_hover", "hover label color", 0xFFEEEEEE));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:label_color_focus", "focus label color", 0xFFFFCC66));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:label_color_current", "current label color", 0xFF66CCFF));
     addConfigValue(makeShared<Config::Values::CFloatValue>("plugin:hyprexpo:label_scale_hover", "hover label scale", 1.0F));
     addConfigValue(makeShared<Config::Values::CFloatValue>("plugin:hyprexpo:label_scale_focus", "focus label scale", 1.0F));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:label_bg_enable", "label background enable", 1));
-    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:label_bg_color", "label background color", 0x88000000));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:label_bg_color", "label background color", 0x88000000));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:label_bg_rounding", "label background rounding", 8));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:label_bg_shape", "label background shape", "circle"));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:label_padding", "label padding", 8));
@@ -477,61 +612,35 @@ static SDispatchResult onKbSelectNumberDispatcher(std::string arg) {
     if (!g_pOverview)
         return {};
 
-    // trim spaces
-    while (!arg.empty() && std::isspace(arg.front()))
-        arg.erase(arg.begin());
-    while (!arg.empty() && std::isspace(arg.back()))
-        arg.pop_back();
-
+    arg = trimString(arg);
     if (arg.empty())
         return {.success = false, .error = "missing number"};
 
     int num = -1;
-    try {
-        num = std::stoi(arg);
-    } catch (...) {
+    if (!parseStrictInteger(arg, num))
         return {.success = false, .error = "invalid number"};
-    }
 
     g_pOverview->onKbSelectNumber(num);
     return {};
 }
 
-static std::optional<int> tokenToIndex(const std::string& s) {
-    if (s.size() != 1)
-        return std::nullopt;
-    const char c = s[0];
-    if (c >= '1' && c <= '9')
-        return (c - '1');
-    if (c == '0')
-        return 9;
-    if (c >= 'a' && c <= 'z')
-        return 10 + (c - 'a');
-    if (c >= 'A' && c <= 'Z')
-        return 10 + (c - 'A');
-    return std::nullopt;
-}
-
 static SDispatchResult onKbSelectTokenDispatcher(std::string arg) {
     if (!g_pOverview)
         return {};
-    while (!arg.empty() && std::isspace(arg.front())) arg.erase(arg.begin());
-    while (!arg.empty() && std::isspace(arg.back())) arg.pop_back();
-    const auto idx = tokenToIndex(arg);
-    if (!idx)
-        return {.success = false, .error = "invalid token (expected 1..9, 0, a..z)"};
-    g_pOverview->onKbSelectToken(*idx);
+    arg = trimString(arg);
+    if (!g_pOverview->selectVisibleToken(arg))
+        return {.success = false, .error = "no visible workspace for token"};
+    g_pOverview->close();
     return {};
 }
 
 static SDispatchResult onKbSelectIndexDispatcher(std::string arg) {
     if (!g_pOverview)
         return {};
-    // trim
-    while (!arg.empty() && std::isspace(arg.front())) arg.erase(arg.begin());
-    while (!arg.empty() && std::isspace(arg.back())) arg.pop_back();
+    arg = trimString(arg);
     int idx = -1;
-    try { idx = std::stoi(arg); } catch (...) { idx = -1; }
+    if (!parseStrictInteger(arg, idx))
+        idx = -1;
     if (idx <= 0)
         return {.success = false, .error = "invalid index (expected >= 1)"};
     // convert to 0-based visible index

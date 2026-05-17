@@ -8,6 +8,7 @@
 #include <hyprland/src/render/Texture.hpp>
 #include <hyprland/src/helpers/AnimatedVariable.hpp>
 #include <hyprland/src/helpers/signal/Signal.hpp>
+#include <string>
 #include <vector>
 
 // saves on resources, but is a bit broken rn with blur.
@@ -33,7 +34,7 @@ class COverview {
     void onSwipeEnd();
 
     // close without a selection
-    void          close();
+    void          close(bool switchToSelection = true);
     void          selectHoveredWorkspace();
 
     // keyboard navigation interface
@@ -41,6 +42,7 @@ class COverview {
     void          onKbConfirm();
     void          onKbSelectNumber(int num);
     void          onKbSelectToken(int visibleIdx);
+    bool          selectVisibleToken(const std::string& token);
 
     bool          blockOverviewRendering = false;
     bool          blockDamageReporting   = false;
@@ -77,10 +79,12 @@ class COverview {
         SP<Render::ITexture>     labelTexHover;
         SP<Render::ITexture>     labelTexFocus;
         SP<Render::ITexture>     labelTexCurrent;
+        SP<Render::ITexture>     selectionLabelTex;
         Vector2D                 labelSizeDefault = {0, 0};
         Vector2D                 labelSizeHover   = {0, 0};
         Vector2D                 labelSizeFocus   = {0, 0};
         Vector2D                 labelSizeCurrent = {0, 0};
+        Vector2D                 selectionLabelSize = {0, 0};
     };
 
     Vector2D                     lastMousePosLocal = Vector2D{};

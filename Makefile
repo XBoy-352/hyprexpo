@@ -6,8 +6,8 @@ else
 endif
 
 CXXFLAGS = -shared -fPIC -g -std=c++2b -Wno-c++11-narrowing -Wno-narrowing
-INCLUDES = `pkg-config --cflags pixman-1 libdrm hyprland pangocairo libinput libudev wayland-server xkbcommon`
-LIBS = `pkg-config --libs pangocairo`
+INCLUDES = `pkg-config --cflags pixman-1 libdrm hyprland pangocairo libinput libudev wayland-server xkbcommon lua5.4`
+LIBS = `pkg-config --libs pangocairo xkbcommon lua5.4`
 
 SRC = main.cpp overview.cpp ExpoGesture.cpp OverviewPassElement.cpp
 TARGET = hyprexpo.so
