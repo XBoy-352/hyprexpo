@@ -4,14 +4,14 @@
   hyprlandPlugins,
 }:
 hyprlandPlugins.mkHyprlandPlugin {
-  pluginName = "hyprexpo-plus";
+  pluginName = "hyprexpo";
   version = "0.1";
   src = ./.;
 
   inherit (hyprland) nativeBuildInputs;
 
   meta = with lib; {
-    homepage = "https://github.com/sandwichfarm/hyprexpo-plus";
+    homepage = "https://github.com/sandwichfarm/hyprexpo";
     description = "An enhanced Hyprland workspaces overview plugin";
     license = licenses.bsd3;
     platforms = platforms.linux;

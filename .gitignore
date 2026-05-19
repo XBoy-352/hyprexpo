@@ -38,14 +38,19 @@
 result
 result-man
 
-#no helper scripts
-*.sh
+# Local helper scripts
+/*.sh
+!/scripts/
+!/scripts/*.sh
 
 # Test files
 test_*.cpp
 test_version
 test_hash
+hyprexpo_logic_tests
+HyprexpoLogicTests
 
 # Planning files
 .planning/*
 .omx/*
+AGENTS.md

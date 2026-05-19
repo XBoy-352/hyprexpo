@@ -18,8 +18,17 @@ add_project_arguments(
   ],
   language: 'cpp')
 
-globber = run_command('find', '.', '-name', '*.cpp', check: true)
-src = globber.stdout().strip().split('\n')
+src = files(
+  'main.cpp',
+  'Dispatchers.cpp',
+  'PluginConfig.cpp',
+  'Overview.cpp',
+  'OverviewInteraction.cpp',
+  'OverviewRender.cpp',
+  'ExpoGesture.cpp',
+  'OverviewPassElement.cpp',
+  'HyprexpoLogic.cpp',
+)
 
 hyprland = dependency('hyprland')
 
@@ -37,3 +46,9 @@ shared_module(meson.project_name(), src,
   ],
   install: true,
 )
+
+logic_tests = executable('HyprexpoLogicTests',
+  files('HyprexpoLogic.cpp', 'tests/HyprexpoLogicTests.cpp'),
+)
+
+test('HyprexpoLogicTests', logic_tests)

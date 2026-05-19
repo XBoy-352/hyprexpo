@@ -8,6 +8,7 @@
 #include <hyprland/src/render/Texture.hpp>
 #include <hyprland/src/helpers/AnimatedVariable.hpp>
 #include <hyprland/src/helpers/signal/Signal.hpp>
+#include <hyprland/src/managers/eventLoop/EventLoopTimer.hpp>
 #include <string>
 #include <vector>
 
@@ -43,31 +44,16 @@ class COverview {
     void          onKbSelectNumber(int num);
     void          onKbSelectToken(int visibleIdx);
     bool          selectVisibleToken(const std::string& token);
+    int64_t       selectedWorkspaceID() const;
+    bool          selectWorkspaceByID(int64_t workspaceID);
+    bool          selectVisibleIndex(size_t index);
+    bool          moveWindowBetweenVisibleIndices(size_t sourceIndex, size_t targetIndex, const PHLWINDOW& window = nullptr);
 
     bool          blockOverviewRendering = false;
     bool          blockDamageReporting   = false;
 
     PHLMONITORREF pMonitor;
     bool          m_isSwiping = false;
-
-  private:
-    void       redrawID(int id, bool forcelowres = false);
-    void       redrawAll(bool forcelowres = false);
-    void       onWorkspaceChange();
-    void       fullRender();
-    void       ensureKbFocusInitialized();
-    bool       isTileValid(int id) const;
-    void       moveFocus(int dx, int dy);
-    int        tileForWorkspaceID(int wsid) const;
-    int        tileForVisibleIndex(int vIdx) const;
-    void       enterSubmapIfEnabled();
-    void       resetSubmapIfNeeded();
-
-    int        SIDE_LENGTH = 3;
-    int        GAP_WIDTH   = 5;
-    CHyprColor BG_COLOR    = CHyprColor{0.1, 0.1, 0.1, 1.0};
-
-    bool       damageDirty = false;
 
     struct SWorkspaceImage {
         SP<Render::IFramebuffer> fb;
@@ -87,6 +73,35 @@ class COverview {
         Vector2D                 selectionLabelSize = {0, 0};
     };
 
+  private:
+    void       redrawID(int id, bool forcelowres = false);
+    void       redrawAll(bool forcelowres = false);
+    void       onWorkspaceChange();
+    void       fullRender();
+    void       updateHoveredFromMouse();
+    void       ensureKbFocusInitialized();
+    bool       isTileValid(int id) const;
+    void       moveFocus(int dx, int dy);
+    int        tileForWorkspaceID(int wsid) const;
+    int        tileForVisibleIndex(int vIdx) const;
+    void       beginWindowDrag();
+    bool       finishWindowDrag();
+    void       updateWindowDrag();
+    void       redrawDraggedWindowTiles(int source, int target);
+    void       queueRedrawID(int id);
+    void       flushQueuedRedraws();
+    PHLWINDOW  windowAtTilePoint(int id, const Vector2D& localPoint) const;
+    Vector2D   tilePointToWorkspacePoint(int id, const Vector2D& localPoint) const;
+    PHLWORKSPACE ensureWorkspaceForTile(int id);
+    void       enterSubmapIfEnabled();
+    void       resetSubmapIfNeeded();
+
+    int        SIDE_LENGTH = 3;
+    int        GAP_WIDTH   = 5;
+    CHyprColor BG_COLOR    = CHyprColor{0.1, 0.1, 0.1, 1.0};
+
+    bool       damageDirty = false;
+
     Vector2D                     lastMousePosLocal = Vector2D{};
 
     int                          openedID  = -1;
@@ -94,6 +109,17 @@ class COverview {
     int                          kbFocusID = -1;
     int                          hoveredID = -1;
     bool                         submapActive = false;
+
+    Vector2D                     dragStartLocal = Vector2D{};
+    int                          dragSourceID   = -1;
+    bool                         dragMoved      = false;
+    Vector2D                     dragGrabOffset = Vector2D{};
+    PHLWINDOW                    dragWindow;
+
+    std::vector<int>             queuedRedrawIDs;
+    std::vector<int>             settlingRedrawIDs;
+    int                          redrawSettleTicks = 0;
+    SP<CEventLoopTimer>          redrawSettleTimer;
 
     std::vector<SWorkspaceImage> images;
 
@@ -111,6 +137,7 @@ class COverview {
 
     bool                         swipe             = false;
     bool                         swipeWasCommenced = false;
+    bool                         showWorkspaceNumbers = false;
 
     friend class COverviewPassElement;
 };

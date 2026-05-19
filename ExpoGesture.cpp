@@ -1,6 +1,6 @@
 #include "ExpoGesture.hpp"
 
-#include "overview.hpp"
+#include "Overview.hpp"
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/helpers/Monitor.hpp>
@@ -11,8 +11,12 @@ void CExpoGesture::begin(const ITrackpadGesture::STrackpadGestureBegin& e) {
     m_lastDelta   = 0.F;
     m_firstUpdate = true;
 
+    const auto monitor = g_pCompositor->getMonitorFromCursor();
+    if (!monitor || !monitor->m_activeWorkspace)
+        return;
+
     if (!g_pOverview)
-        g_pOverview = std::make_unique<COverview>(g_pCompositor->getMonitorFromCursor()->m_activeWorkspace);
+        g_pOverview = std::make_unique<COverview>(monitor->m_activeWorkspace, true);
     else {
         g_pOverview->selectHoveredWorkspace();
         g_pOverview->setClosing(true);
@@ -20,6 +24,9 @@ void CExpoGesture::begin(const ITrackpadGesture::STrackpadGestureBegin& e) {
 }
 
 void CExpoGesture::update(const ITrackpadGesture::STrackpadGestureUpdate& e) {
+    if (!g_pOverview)
+        return;
+
     if (m_firstUpdate) {
         m_firstUpdate = false;
         return;
@@ -34,6 +41,9 @@ void CExpoGesture::update(const ITrackpadGesture::STrackpadGestureUpdate& e) {
 }
 
 void CExpoGesture::end(const ITrackpadGesture::STrackpadGestureEnd& e) {
+    if (!g_pOverview)
+        return;
+
     g_pOverview->setClosing(false);
     g_pOverview->onSwipeEnd();
     g_pOverview->resetSwipe();
