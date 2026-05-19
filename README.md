@@ -4,21 +4,6 @@ Expose for HyprLand, the original HyprExpo fork [since long before it was retire
 
 https://github.com/user-attachments/assets/861baa26-46b6-4fa8-8d37-65cbb9ecbed4
 
-## Documentation and Site
-
-The VitePress documentation source lives in `docs/`; the public SPA source lives
-in `site/`. Build both static outputs into `dist/` with:
-
-```bash
-./scripts/build-site.sh
-```
-
-Preview the built output with:
-
-```bash
-./scripts/serve-site.sh
-```
-
 ## Install
 
 ### Via `hyprpm`
@@ -515,3 +500,19 @@ plugin {
 - Per-monitor workspace placement does not apply: check the monitor name from
   Hyprland and use comma-separated entries such as
   `DP-1 first 1, HDMI-1 center 5, center current`.
+
+
+## Documentation and Site
+
+The VitePress documentation source lives in `docs/`; the public SPA source lives
+in `site/`. Build both static outputs into `dist/` with:
+
+```bash
+./scripts/build-site.sh
+```
+
+Preview the built output with:
+
+```bash
+./scripts/serve-site.sh
+```
