@@ -17,8 +17,8 @@ https://github.com/user-attachments/assets/861baa26-46b6-4fa8-8d37-65cbb9ecbed4
 ### Via `hyprpm`
 
 ```bash
-hyprpm add https://github.com/sandwichfarm/hyprexpo-plus
-hyprpm enable hyprexpo-plus
+hyprpm add https://github.com/sandwichfarm/hyprexpo
+hyprpm enable hyprexpo
 hyprpm reload
 ```
 
@@ -34,8 +34,8 @@ hyprland pixman-1 libdrm pangocairo libinput libudev wayland-server xkbcommon lu
 Build with the Makefile:
 
 ```bash
-git clone https://github.com/sandwichfarm/hyprexpo-plus
-cd hyprexpo-plus
+git clone https://github.com/sandwichfarm/hyprexpo
+cd hyprexpo
 make all
 ```
 
@@ -53,6 +53,19 @@ cmake -S . -B build
 cmake --build build
 ```
 
+Verify a local build with the same command set used for release preparation:
+
+```bash
+make test
+make all
+cmake -S . -B build-cmake
+cmake --build build-cmake
+ctest --test-dir build-cmake --output-on-failure
+meson setup build-meson
+meson compile -C build-meson
+meson test -C build-meson --print-errorlogs
+```
+
 To install the Makefile build over the `hyprpm` managed copy:
 
 ```bash
@@ -64,7 +77,7 @@ Equivalent manual install:
 
 ```bash
 install -Dm755 hyprexpo.so \
-    /var/cache/hyprpm/$USER/hyprexpo-plus/hyprexpo-plus.so
+    /var/cache/hyprpm/$USER/hyprexpo/hyprexpo.so
 hyprpm reload
 ```
 
@@ -73,6 +86,48 @@ hyprpm reload
 > the plugin into the running process. Overwriting the file in place can corrupt
 > that live mapping and crash the session; `install` replaces the inode
 > atomically.
+
+### Nix
+
+Nix users should build HyprExpo+ through the Nix Hyprland plugin path instead of
+mixing a `hyprpm` artifact into a Nix-managed Hyprland session. The repository
+contains `default.nix`, which uses `hyprlandPlugins.mkHyprlandPlugin` so the
+plugin follows the Hyprland input supplied by the caller.
+
+Hyprland plugins are ABI-sensitive. Keep the plugin build and running Hyprland
+revision aligned; if Hyprland is updated, rebuild the plugin from the same
+Hyprland input before loading it.
+
+## Compatibility and Release Provenance
+
+Hyprland checks plugin API compatibility when loading a plugin. If the plugin was
+built against an incompatible Hyprland revision, loading should fail with a
+visible API/hash mismatch instead of silently running against the wrong ABI.
+
+Release builds attach `release-provenance.txt` next to `hyprexpo.so`. That file
+records the packaged Hyprland version, Lua pkg-config version, compiler, and
+`ldd -r` output for the release artifact.
+
+### Runtime Smoke Checklist
+
+Run these checks in a nested Hyprland session or another disposable compositor
+session before publishing a release:
+
+`scripts/run-nested.sh` launches a disposable nested session with the local
+`hyprexpo.so`; `scripts/dev-watch.sh` rebuilds and relaunches that session on
+source changes.
+
+1. Load the locally built plugin and confirm no API/hash mismatch is reported.
+2. Toggle overview on and off with `hyprexpo:expo, toggle`.
+3. Cancel overview with the configured `cancel_key` and confirm the workspace
+   does not change.
+4. Move keyboard focus with `hyprexpo:kb_focus`, then select with
+   `hyprexpo:kb_confirm`.
+5. Select by pointer or touch near the outside edges of the monitor.
+6. Confirm current, hover, focus, label, and border styling render as configured.
+7. Exercise the Lua gesture registration path and complete/cancel a swipe.
+8. Unload or reload the plugin after closing overview and confirm no stale render
+   pass callback crashes the session.
 
 ## Quick Config
 
@@ -151,12 +206,13 @@ strings because border settings also accept gradient specs.
 
 | key | type | description | default |
 | --- | --- | --- | --- |
-| `plugin:hyprexpo:columns` | int | desktops per row | `3` |
+| `plugin:hyprexpo:columns` | int | desktops per row, clamped to `1..7` | `3` |
 | `plugin:hyprexpo:gaps_in` | int | spacing between tiles in pixels | `5` |
 | `plugin:hyprexpo:gaps_out` | int | outer margin around the grid in pixels | `0` |
 | `plugin:hyprexpo:bg_col` | color | grid background color | `0xFF111111` |
 | `plugin:hyprexpo:workspace_method` | string | placement: `center current` or `first <workspace>` | `center current` |
 | `plugin:hyprexpo:skip_empty` | bool int | skip empty workspaces using selector `m` when enabled | `0` |
+| `plugin:hyprexpo:max_workspace` | int | when `skip_empty = 0`, cap sequential overview tiles at this workspace ID; `0` keeps Hyprland selector behavior | `0` |
 | `plugin:hyprexpo:gesture_distance` | int | swipe distance considered complete | `200` |
 | `plugin:hyprexpo:cancel_key` | string | comma-separated key names that close overview without selecting; `none` or `off` disables | `escape` |
 | `plugin:hyprexpo:show_cursor` | bool int | keep the cursor visible while overview is open; set `0` for old hidden-cursor behavior | `1` |
@@ -203,6 +259,8 @@ border_color_current = rgba(33ccffee) rgba(00ff99ee) 45deg
 | `plugin:hyprexpo:label_color_hover` | color | hovered label text color | `rgb(eeeeee)` |
 | `plugin:hyprexpo:label_color_focus` | color | focused label text color | `rgb(ffcc66)` |
 | `plugin:hyprexpo:label_color_current` | color | current workspace label text color | `rgb(66ccff)` |
+| `plugin:hyprexpo:show_workspace_numbers` | bool int | force labels to show workspace IDs regardless of `label_text_mode` | `0` |
+| `plugin:hyprexpo:workspace_number_color` | color | forced workspace ID label color | `rgb(ffffff)` |
 | `plugin:hyprexpo:label_scale_hover` | float | hover scale multiplier | `1.0` |
 | `plugin:hyprexpo:label_scale_focus` | float | focus scale multiplier | `1.0` |
 | `plugin:hyprexpo:label_font_size` | int | base font size in pixels | `16` |
@@ -258,6 +316,8 @@ bind = SUPER, g, hyprexpo:expo, toggle
 | `off` or `disable` | hide overview |
 | `cancel` | hide overview without switching workspaces |
 | `select` | select the hovered workspace |
+| `bring` | move the top mapped window from the hovered workspace into the current workspace |
+| `1`..`9` | select that workspace by ID while overview is open; otherwise dispatch a normal workspace switch |
 
 Keyboard navigation dispatchers are active during overview:
 
@@ -268,6 +328,7 @@ Keyboard navigation dispatchers are active during overview:
 | `hyprexpo:kb_selecti` | index | select by 1-based visible index |
 | `hyprexpo:kb_selectn` | workspace ID | select by workspace ID; `0` maps to workspace `10` |
 | `hyprexpo:kb_select` | token | select by token; uses the selection-label map when enabled |
+| `hyprexpo:move_window` | `source target [address]` | move a window between 1-based visible tile indices; defaults to the top mapped source-window |
 
 Hyprland may briefly report invalid dispatcher messages during startup if binds
 are parsed before plugins are loaded. Those messages are cosmetic; the
@@ -427,3 +488,20 @@ plugin {
     }
 }
 ```
+
+## Troubleshooting
+
+- Plugin load fails with an API or hash mismatch: rebuild HyprExpo+ against the
+  same Hyprland revision that is running, then reload the plugin.
+- Plugin load fails because dependencies are missing: install the build
+  dependencies listed above and rebuild. `lua5.4`, `pangocairo`, and `xkbcommon`
+  are linked by the current plugin.
+- Invalid `workspace_method` or border color values: HyprExpo+ logs the invalid
+  value and falls back safely. Use the formats shown in the sections above.
+- `columns` is outside the supported range: the runtime clamps it to `1..7` so
+  pointer and keyboard selection stay in bounds.
+- Replacing a loaded `.so` crashes Hyprland: use `make install` or `install`
+  instead of overwriting the file with `cp`.
+- Per-monitor workspace placement does not apply: check the monitor name from
+  Hyprland and use comma-separated entries such as
+  `DP-1 first 1, HDMI-1 center 5, center current`.

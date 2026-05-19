@@ -7,9 +7,19 @@ project(hyprexpo
 
 set(CMAKE_CXX_STANDARD 23)
 
-file(GLOB_RECURSE SRC "*.cpp")
+set(HYPREXPO_SRC
+    main.cpp
+    Dispatchers.cpp
+    PluginConfig.cpp
+    Overview.cpp
+    OverviewInteraction.cpp
+    OverviewRender.cpp
+    ExpoGesture.cpp
+    OverviewPassElement.cpp
+    HyprexpoLogic.cpp
+)
 
-add_library(hyprexpo SHARED ${SRC})
+add_library(hyprexpo SHARED ${HYPREXPO_SRC})
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(deps REQUIRED IMPORTED_TARGET
@@ -24,5 +34,12 @@ pkg_check_modules(deps REQUIRED IMPORTED_TARGET
     lua5.4
 )
 target_link_libraries(hyprexpo PRIVATE rt PkgConfig::deps)
+
+enable_testing()
+add_executable(HyprexpoLogicTests
+    HyprexpoLogic.cpp
+    tests/HyprexpoLogicTests.cpp
+)
+add_test(NAME HyprexpoLogicTests COMMAND HyprexpoLogicTests)
 
 install(TARGETS hyprexpo)

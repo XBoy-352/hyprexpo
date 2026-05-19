@@ -1,8 +1,8 @@
 [repository]
-name = "hyprexpo-plus"
+name = "hyprexpo"
 authors = ["sandwich.farm"]
 
-[hyprexpo-plus]
+[hyprexpo]
 description = "hyprexpo+ — keyboard selection, labels, gaps, and Hyprland-style borders"
 authors = ["sandwich"]
 output = "hyprexpo.so"
