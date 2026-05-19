@@ -113,9 +113,12 @@ records the packaged Hyprland version, Lua pkg-config version, compiler, and
 Run these checks in a nested Hyprland session or another disposable compositor
 session before publishing a release:
 
-`scripts/run-nested.sh` launches a disposable nested session with the local
-`hyprexpo.so`; `scripts/dev-watch.sh` rebuilds and relaunches that session on
-source changes.
+`scripts/run-nested.sh` launches a disposable nested session with a fresh
+user-owned build under `${XDG_CACHE_HOME:-$HOME/.cache}/hyprexpo-plus`;
+`scripts/dev-watch.sh` rebuilds and relaunches that session on source changes.
+Nested test binds are `F10` for overview, `SUPER+Return` for a terminal,
+`SUPER+1..9` for workspaces, `SUPER+SHIFT+1..9` to move a window, `SUPER+Q`
+to close a window, and `SUPER+SHIFT+Q` to exit.
 
 1. Load the locally built plugin and confirm no API/hash mismatch is reported.
 2. Toggle overview on and off with `hyprexpo:expo, toggle`.

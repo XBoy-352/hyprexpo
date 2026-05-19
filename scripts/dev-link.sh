@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Link local hyprexpo.so into the hyprpm-installed plugin path for quick testing.
+# Link a cached local hyprexpo.so into the hyprpm-installed plugin path.
 #
 # Usage:
-#   ./scripts/dev-link.sh                 # auto-detect installed hyprexpo.so and symlink to local build
+#   ./scripts/dev-link.sh                 # auto-detect installed hyprexpo.so and symlink to cached build
 #   ./scripts/dev-link.sh -b              # build first, then link
 #   ./scripts/dev-link.sh -t /path/to/hyprexpo.so  # specify target path explicitly
 #   ./scripts/dev-link.sh -r              # restore original file from .bak and remove symlink
@@ -15,7 +15,8 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
-local_so="$repo_root/hyprexpo.so"
+build_dir="${XDG_CACHE_HOME:-$HOME/.cache}/hyprexpo-plus"
+local_so="${HYPREXPO_DEV_SO:-$build_dir/hyprexpo.so}"
 target_so=""
 do_build=0
 do_restore=0
@@ -27,15 +28,16 @@ err() { echo "[dev-link] ERROR: $*" >&2; exit 1; }
 
 usage() {
   cat <<'EOF'
-Link local hyprexpo.so into the hyprpm-installed plugin path for quick testing.
+Link a cached local hyprexpo.so into the hyprpm-installed plugin path.
 
 Usage:
-  ./scripts/dev-link.sh                 # auto-detect installed hyprexpo.so and symlink to local build
+  ./scripts/dev-link.sh                 # auto-detect installed hyprexpo.so and symlink to cached build
   ./scripts/dev-link.sh -b              # build first, then link
   ./scripts/dev-link.sh -t /path/to/hyprexpo.so  # specify target path explicitly
   ./scripts/dev-link.sh -r              # restore original file from .bak and remove symlink
 
 Notes:
+- Local builds default to ${XDG_CACHE_HOME:-$HOME/.cache}/hyprexpo-plus/hyprexpo.so.
 - This script only affects your local user install if hyprpm installed to XDG_DATA_HOME.
 - If your hyprexpo is system-wide, you may need sudo to replace it.
 EOF
@@ -114,8 +116,9 @@ if (( do_restore )); then
 fi
 
 if (( do_build )); then
-  msg "Building hyprexpo.so"
-  make -C "$repo_root" all
+  mkdir -p "$(dirname "$local_so")"
+  msg "Building $local_so"
+  make -C "$repo_root" all TARGET="$local_so"
 fi
 
 [[ -f "$local_so" ]] || err "Local build not found: $local_so (run with -b to build)"

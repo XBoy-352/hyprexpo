@@ -6,17 +6,24 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-SO="$REPO_ROOT/hyprexpo.so"
+BUILD_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/hyprexpo-plus"
+SO="${HYPREXPO_DEV_SO:-$BUILD_DIR/hyprexpo.so}"
 CONF="${XDG_CACHE_HOME:-$HOME/.cache}/hyprexpo-dev.conf"
 
-if [[ ! -f "$SO" ]]; then
-  echo "[run-nested] Build first: make -C $REPO_ROOT" >&2
-  exit 1
-fi
+mkdir -p "$(dirname "$CONF")" "$(dirname "$SO")"
+echo "[run-nested] Building local plugin at $SO"
+make -C "$REPO_ROOT" all TARGET="$SO"
 
-mkdir -p "$(dirname "$CONF")"
 cat > "$CONF" <<EOF
 monitor=,preferred,auto,auto
+
+debug {
+  disable_logs = false
+}
+
+cursor {
+  no_hardware_cursors = true
+}
 
 # load local build
 plugin = $SO
@@ -70,27 +77,50 @@ plugin {
 }
 
 # toggle with an unmodified function key to avoid host grabs
-bind = , F10, hyprexpo:expo, toggle
+bind = , F10, exec, hyprctl dispatch hyprexpo:expo toggle
+
+# nested-session test controls
+bind = SUPER, Return, exec, kitty
+bind = SUPER, Q, killactive
+bind = SUPER SHIFT, Q, exit
+bind = SUPER, 1, workspace, 1
+bind = SUPER, 2, workspace, 2
+bind = SUPER, 3, workspace, 3
+bind = SUPER, 4, workspace, 4
+bind = SUPER, 5, workspace, 5
+bind = SUPER, 6, workspace, 6
+bind = SUPER, 7, workspace, 7
+bind = SUPER, 8, workspace, 8
+bind = SUPER, 9, workspace, 9
+bind = SUPER SHIFT, 1, movetoworkspace, 1
+bind = SUPER SHIFT, 2, movetoworkspace, 2
+bind = SUPER SHIFT, 3, movetoworkspace, 3
+bind = SUPER SHIFT, 4, movetoworkspace, 4
+bind = SUPER SHIFT, 5, movetoworkspace, 5
+bind = SUPER SHIFT, 6, movetoworkspace, 6
+bind = SUPER SHIFT, 7, movetoworkspace, 7
+bind = SUPER SHIFT, 8, movetoworkspace, 8
+bind = SUPER SHIFT, 9, movetoworkspace, 9
 
 # submap for keyboard nav (the plugin auto-enters this when open)
 submap = hyprexpo
-  bind = , left,  hyprexpo:kb_focus, left
-  bind = , right, hyprexpo:kb_focus, right
-  bind = , up,    hyprexpo:kb_focus, up
-  bind = , down,  hyprexpo:kb_focus, down
-  bind = , return, hyprexpo:kb_confirm
-  bind = , 1, hyprexpo:kb_selectn, 1
-  bind = , 2, hyprexpo:kb_selectn, 2
-  bind = , 3, hyprexpo:kb_selectn, 3
-  bind = , 4, hyprexpo:kb_selectn, 4
-  bind = , 5, hyprexpo:kb_selectn, 5
-  bind = , 6, hyprexpo:kb_selectn, 6
-  bind = , 7, hyprexpo:kb_selectn, 7
-  bind = , 8, hyprexpo:kb_selectn, 8
-  bind = , 9, hyprexpo:kb_selectn, 9
-  bind = , 0, hyprexpo:kb_selectn, 0
+  bind = , left,  exec, hyprctl dispatch hyprexpo:kb_focus left
+  bind = , right, exec, hyprctl dispatch hyprexpo:kb_focus right
+  bind = , up,    exec, hyprctl dispatch hyprexpo:kb_focus up
+  bind = , down,  exec, hyprctl dispatch hyprexpo:kb_focus down
+  bind = , return, exec, hyprctl dispatch hyprexpo:kb_confirm
+  bind = , 1, exec, hyprctl dispatch hyprexpo:kb_selectn 1
+  bind = , 2, exec, hyprctl dispatch hyprexpo:kb_selectn 2
+  bind = , 3, exec, hyprctl dispatch hyprexpo:kb_selectn 3
+  bind = , 4, exec, hyprctl dispatch hyprexpo:kb_selectn 4
+  bind = , 5, exec, hyprctl dispatch hyprexpo:kb_selectn 5
+  bind = , 6, exec, hyprctl dispatch hyprexpo:kb_selectn 6
+  bind = , 7, exec, hyprctl dispatch hyprexpo:kb_selectn 7
+  bind = , 8, exec, hyprctl dispatch hyprexpo:kb_selectn 8
+  bind = , 9, exec, hyprctl dispatch hyprexpo:kb_selectn 9
+  bind = , 0, exec, hyprctl dispatch hyprexpo:kb_selectn 0
 submap = reset
 EOF
 
 echo "[run-nested] Launching nested Hyprland with $CONF"
-exec env WLR_BACKENDS=wayland WLR_RENDERER=pixman HYPRLAND_NO_LOGO=1 Hyprland -c "$CONF"
+exec env WLR_BACKENDS=wayland WLR_RENDERER=pixman WLR_NO_HARDWARE_CURSORS=1 HYPRLAND_NO_LOGO=1 Hyprland -c "$CONF"
