@@ -32,7 +32,7 @@ Preview the built output with:
 ### Via `hyprpm`
 
 ```bash
-hyprpm add https://github.com/sandwichfarm/hyprexpo-plus
+hyprpm add https://github.com/sandwichfarm/hyprexpo
 hyprpm enable hyprexpo
 hyprpm reload
 ```
@@ -49,8 +49,8 @@ hyprland pixman-1 libdrm pangocairo libinput libudev wayland-server xkbcommon lu
 Build with the Makefile:
 
 ```bash
-git clone https://github.com/sandwichfarm/hyprexpo-plus
-cd hyprexpo-plus
+git clone https://github.com/sandwichfarm/hyprexpo
+cd hyprexpo
 make all
 ```
 
