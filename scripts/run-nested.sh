@@ -77,7 +77,7 @@ plugin {
 }
 
 # toggle with an unmodified function key to avoid host grabs
-bind = , F10, exec, hyprctl dispatch hyprexpo:expo toggle
+bind = , F10, hyprexpo:expo, toggle
 
 # nested-session test controls
 bind = SUPER, Return, exec, kitty
@@ -104,21 +104,21 @@ bind = SUPER SHIFT, 9, movetoworkspace, 9
 
 # submap for keyboard nav (the plugin auto-enters this when open)
 submap = hyprexpo
-  bind = , left,  exec, hyprctl dispatch hyprexpo:kb_focus left
-  bind = , right, exec, hyprctl dispatch hyprexpo:kb_focus right
-  bind = , up,    exec, hyprctl dispatch hyprexpo:kb_focus up
-  bind = , down,  exec, hyprctl dispatch hyprexpo:kb_focus down
-  bind = , return, exec, hyprctl dispatch hyprexpo:kb_confirm
-  bind = , 1, exec, hyprctl dispatch hyprexpo:kb_selectn 1
-  bind = , 2, exec, hyprctl dispatch hyprexpo:kb_selectn 2
-  bind = , 3, exec, hyprctl dispatch hyprexpo:kb_selectn 3
-  bind = , 4, exec, hyprctl dispatch hyprexpo:kb_selectn 4
-  bind = , 5, exec, hyprctl dispatch hyprexpo:kb_selectn 5
-  bind = , 6, exec, hyprctl dispatch hyprexpo:kb_selectn 6
-  bind = , 7, exec, hyprctl dispatch hyprexpo:kb_selectn 7
-  bind = , 8, exec, hyprctl dispatch hyprexpo:kb_selectn 8
-  bind = , 9, exec, hyprctl dispatch hyprexpo:kb_selectn 9
-  bind = , 0, exec, hyprctl dispatch hyprexpo:kb_selectn 0
+  bind = , left, hyprexpo:kb_focus, left
+  bind = , right, hyprexpo:kb_focus, right
+  bind = , up, hyprexpo:kb_focus, up
+  bind = , down, hyprexpo:kb_focus, down
+  bind = , return, hyprexpo:kb_confirm
+  bind = , 1, hyprexpo:kb_selectn, 1
+  bind = , 2, hyprexpo:kb_selectn, 2
+  bind = , 3, hyprexpo:kb_selectn, 3
+  bind = , 4, hyprexpo:kb_selectn, 4
+  bind = , 5, hyprexpo:kb_selectn, 5
+  bind = , 6, hyprexpo:kb_selectn, 6
+  bind = , 7, hyprexpo:kb_selectn, 7
+  bind = , 8, hyprexpo:kb_selectn, 8
+  bind = , 9, hyprexpo:kb_selectn, 9
+  bind = , 0, hyprexpo:kb_selectn, 0
 submap = reset
 EOF
 

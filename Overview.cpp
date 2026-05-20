@@ -372,6 +372,50 @@ void restoreWorkspacePreviewState(const PHLWORKSPACE& workspace, const SWorkspac
     *workspace->m_renderOffset = state.offsetGoal;
 }
 
+std::vector<std::pair<PHLWORKSPACE, SWorkspacePreviewState>> applyExclusiveWorkspacePreviewState(const PHLWORKSPACE& targetWorkspace) {
+    std::vector<std::pair<PHLWORKSPACE, SWorkspacePreviewState>> states;
+
+    for (const auto& workspaceRef : g_pCompositor->getWorkspaces()) {
+        const auto workspace = workspaceRef.lock();
+        if (!workspace)
+            continue;
+
+        states.push_back({
+            workspace,
+            {
+                .visible        = workspace->m_visible,
+                .forceRendering = workspace->m_forceRendering,
+                .alphaValue     = workspace->m_alpha->value(),
+                .alphaGoal      = workspace->m_alpha->goal(),
+                .offsetValue    = workspace->m_renderOffset->value(),
+                .offsetGoal     = workspace->m_renderOffset->goal(),
+            },
+        });
+
+        if (workspace == targetWorkspace) {
+            workspace->m_visible        = true;
+            workspace->m_forceRendering = true;
+            workspace->m_alpha->setValueAndWarp(1.F);
+            *workspace->m_alpha = 1.F;
+        } else {
+            workspace->m_visible        = false;
+            workspace->m_forceRendering = false;
+            workspace->m_alpha->setValueAndWarp(0.F);
+            *workspace->m_alpha = 0.F;
+        }
+
+        workspace->m_renderOffset->setValueAndWarp(Vector2D{});
+        *workspace->m_renderOffset = Vector2D{};
+    }
+
+    return states;
+}
+
+void restoreWorkspacePreviewStates(const std::vector<std::pair<PHLWORKSPACE, SWorkspacePreviewState>>& states) {
+    for (const auto& [workspace, state] : states)
+        restoreWorkspacePreviewState(workspace, state);
+}
+
 bool windowVisibleOnWorkspace(const PHLWINDOW& window, const PHLWORKSPACE& workspace) {
     return window && workspace && window->m_workspace == workspace && window->m_isMapped && !window->isHidden() && !window->m_pinned;
 }
@@ -386,6 +430,20 @@ void settleWorkspaceMoveAnimation(const PHLWINDOW& window) {
     window->alpha(Desktop::View::WINDOW_ALPHA_MOVE_FROM_WORKSPACE)->setValueAndWarp(1.F);
     *window->alpha(Desktop::View::WINDOW_ALPHA_MOVE_FROM_WORKSPACE) = 1.F;
     window->m_monitorMovedFrom                                      = -1;
+}
+
+void settleWorkspaceMoveAnimations() {
+    for (const auto& window : g_pCompositor->m_windows) {
+        if (!window)
+            continue;
+
+        const bool movingWorkspace = window->m_monitorMovedFrom != -1 || window->alpha(Desktop::View::WINDOW_ALPHA_MOVE_TO_WORKSPACE)->isBeingAnimated() ||
+            window->alpha(Desktop::View::WINDOW_ALPHA_MOVE_FROM_WORKSPACE)->isBeingAnimated();
+        if (!movingWorkspace)
+            continue;
+
+        settleWorkspaceMoveAnimation(window);
+    }
 }
 
 void ensureFramebuffer(COverview::SWorkspaceImage& image, const CBox& monbox, uint32_t drmFormat) {
@@ -653,6 +711,7 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
         PMONITOR->m_activeSpecialWorkspace.reset();
 
     g_pHyprRenderer->m_bBlockSurfaceFeedback = true;
+    settleWorkspaceMoveAnimations();
 
     startedOn->m_visible = false;
 
@@ -673,7 +732,7 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
         if (PWORKSPACE) {
             image.pWorkspace        = PWORKSPACE;
             const auto previousWS    = activateWorkspaceForPreview(PMONITOR, PWORKSPACE);
-            const auto previewState  = applyWorkspacePreviewState(PWORKSPACE);
+            const auto previewStates = applyExclusiveWorkspacePreviewState(PWORKSPACE);
             const auto windowState   = PWORKSPACE == startedOn ? std::vector<SWindowPreviewState>{} : applyWorkspaceWindowGoalState(PWORKSPACE);
 
             if (PWORKSPACE == startedOn)
@@ -682,7 +741,7 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
             g_pHyprRenderer->renderWorkspace(PMONITOR, PWORKSPACE, Time::steadyNow(), monbox);
 
             restoreWorkspaceWindowGoalState(windowState);
-            restoreWorkspacePreviewState(PWORKSPACE, previewState);
+            restoreWorkspacePreviewStates(previewStates);
             restoreActiveWorkspaceAfterPreview(PMONITOR, previousWS);
             startedOn->m_visible = false;
 

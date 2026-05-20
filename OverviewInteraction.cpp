@@ -162,6 +162,8 @@ void COverview::beginWindowDrag() {
     dragMoved      = false;
     dragWindow     = windowAtTilePoint(dragSourceID, dragStartLocal);
     dragGrabOffset = Vector2D{};
+    dropIntent         = {};
+    dropIntentTargetID = -1;
 
     if (!dragWindow)
         return;
@@ -174,15 +176,16 @@ void COverview::beginWindowDrag() {
 }
 
 void COverview::updateWindowDrag() {
-    if (!dragWindow || dragMoved)
+    if (!dragWindow)
         return;
 
     const auto dx = lastMousePosLocal.x - dragStartLocal.x;
     const auto dy = lastMousePosLocal.y - dragStartLocal.y;
-    if (std::hypot(dx, dy) < 12.0)
+    if (!dragMoved && std::hypot(dx, dy) < 12.0)
         return;
 
-    dragMoved = true;
+    if (!dragMoved)
+        dragMoved = true;
     damage();
 }
 
@@ -211,6 +214,8 @@ bool COverview::finishWindowDrag() {
     dragSourceID   = -1;
     dragMoved      = false;
     dragGrabOffset = Vector2D{};
+    dropIntent         = {};
+    dropIntentTargetID = -1;
     Cursor::overrideController->setOverride("left_ptr", Cursor::CURSOR_OVERRIDE_UNKNOWN);
 
     if (!WINDOW || !MOVED)

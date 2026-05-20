@@ -20,6 +20,10 @@ bool near(float a, float b) {
     return std::abs(a - b) < 0.001F;
 }
 
+bool near(double a, double b) {
+    return std::abs(a - b) < 0.001;
+}
+
 }
 
 int main() {
@@ -36,6 +40,36 @@ int main() {
     expect(tileIndexFromPoint(299, 299, 300, 300, 3) == 8, "tile index bottom-right inside");
     expect(tileIndexFromPoint(300, 300, 300, 300, 3) == 8, "tile index clamps monitor edge");
     expect(tileIndexFromPoint(10, 10, 0, 300, 3) == -1, "tile index rejects invalid width");
+
+    SDropIntentInput dropInput{
+        .targetValid     = true,
+        .pointerLocal    = {150, 150},
+        .targetTileLocal = {0, 0, 300, 300},
+        .workspaceSize   = {1200, 900},
+        .windowSize      = {300, 180},
+        .grabOffset      = {150, 90},
+    };
+    auto drop = computeDropIntentGeometry(dropInput);
+    expect(drop.valid, "drop intent center is valid");
+    expect(near(drop.targetWorkspacePoint.x, 600) && near(drop.targetWorkspacePoint.y, 450), "drop intent maps pointer to workspace point");
+    expect(near(drop.targetProxyLocal.x, 112.5) && near(drop.targetProxyLocal.y, 120), "drop intent preserves grab offset");
+    expect(near(drop.targetProxyLocal.w, 75) && near(drop.targetProxyLocal.h, 60), "drop intent scales window into target preview");
+
+    dropInput.pointerLocal = {300, 300};
+    drop                   = computeDropIntentGeometry(dropInput);
+    expect(near(drop.targetWorkspacePoint.x, 1200) && near(drop.targetWorkspacePoint.y, 900), "drop intent maps bottom-right edge");
+    expect(near(drop.targetProxyLocal.x, 225) && near(drop.targetProxyLocal.y, 240), "drop intent clamps bottom-right proxy");
+
+    dropInput.pointerLocal = {-20, -20};
+    drop                   = computeDropIntentGeometry(dropInput);
+    expect(near(drop.targetWorkspacePoint.x, 0) && near(drop.targetWorkspacePoint.y, 0), "drop intent clamps outside pointer to workspace edge");
+    expect(near(drop.targetProxyLocal.x, 0) && near(drop.targetProxyLocal.y, 0), "drop intent clamps outside pointer proxy to tile edge");
+
+    dropInput.targetValid = false;
+    expect(!computeDropIntentGeometry(dropInput).valid, "drop intent rejects invalid target");
+    dropInput.targetValid  = true;
+    dropInput.windowSize.w = 0;
+    expect(!computeDropIntentGeometry(dropInput).valid, "drop intent rejects invalid window size");
 
     expect(fallbackTokenForVisibleIndex(0) == "1", "fallback token first workspace");
     expect(fallbackTokenForVisibleIndex(9) == "0", "fallback token tenth workspace");

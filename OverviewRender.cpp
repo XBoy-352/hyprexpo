@@ -32,6 +32,7 @@ void COverview::redrawID(int id, bool forcelowres) {
     blockOverviewRendering = true;
 
     Render::GL::g_pHyprOpenGL->makeEGLCurrent();
+    settleWorkspaceMoveAnimations();
 
     id = std::clamp(id, 0, SIDE_LENGTH * SIDE_LENGTH - 1);
 
@@ -79,7 +80,7 @@ void COverview::redrawID(int id, bool forcelowres) {
 
     if (PWORKSPACE) {
         const auto previousWS    = activateWorkspaceForPreview(pMonitor.lock(), PWORKSPACE);
-        const auto previewState  = applyWorkspacePreviewState(PWORKSPACE);
+        const auto previewStates = applyExclusiveWorkspacePreviewState(PWORKSPACE);
         const auto windowState   = PWORKSPACE == startedOn ? std::vector<SWindowPreviewState>{} : applyWorkspaceWindowGoalState(PWORKSPACE);
 
         if (PWORKSPACE == startedOn)
@@ -88,7 +89,7 @@ void COverview::redrawID(int id, bool forcelowres) {
         g_pHyprRenderer->renderWorkspace(pMonitor.lock(), PWORKSPACE, Time::steadyNow(), monbox);
 
         restoreWorkspaceWindowGoalState(windowState);
-        restoreWorkspacePreviewState(PWORKSPACE, previewState);
+        restoreWorkspacePreviewStates(previewStates);
         restoreActiveWorkspaceAfterPreview(pMonitor.lock(), previousWS);
 
         if (PWORKSPACE == startedOn)
@@ -541,6 +542,38 @@ void COverview::fullRender() {
         }
     };
 
+    auto drawProxyBorder = [&](const CBox& proxy, int round, int borderWidth, const std::string& borderSpec, const std::string& fallbackSpec) {
+        if (borderWidth <= 0)
+            return;
+
+        std::string effectiveSpec = borderSpec.empty() ? fallbackSpec : borderSpec;
+        if (effectiveSpec.empty())
+            return;
+
+        if (isGradientBorderSpec(effectiveSpec)) {
+            const auto spec = parseGradientSpec(effectiveSpec);
+            if (!spec.valid)
+                return;
+
+            Config::CGradientValueData grad;
+            grad.m_colors.clear();
+            grad.m_colors.push_back(spec.c1);
+            grad.m_colors.push_back(spec.c2);
+            grad.m_angle = spec.angleDeg * (float)M_PI / 180.f;
+            grad.updateColorsOk();
+            Render::GL::g_pHyprOpenGL->renderBorder(proxy, grad, {.round = round, .roundingPower = ROUND_PWR, .borderSize = borderWidth});
+            return;
+        }
+
+        Hyprexpo::SColorRGBA parsedColor;
+        if (Hyprexpo::parseSolidColorSpec(effectiveSpec, parsedColor)) {
+            Config::CGradientValueData grad{CHyprColor{parsedColor.r, parsedColor.g, parsedColor.b, parsedColor.a}};
+            grad.updateColorsOk();
+            Render::GL::g_pHyprOpenGL->renderBorder(proxy, grad, {.round = round, .roundingPower = ROUND_PWR, .borderSize = borderWidth});
+        } else
+            Log::logger->log(Log::ERR, "[hyprexpo] invalid drag_drop_proxy_border_color config: {}", effectiveSpec);
+    };
+
     // Draw borders in order: hover (lowest), then current, then focus (highest priority)
     if (hoveredID != -1 && hoveredID != openedID && hoveredID != kbFocusID)
         drawBorderForID(hoveredID, std::string{*PBCOLHOV}, std::string{*PBGREHOV}, RND_HOV);
@@ -552,6 +585,9 @@ void COverview::fullRender() {
         const int         sourceWidth  = **PDRAGSOURCEBWIDTH >= 0 ? **PDRAGSOURCEBWIDTH : (int)**PBWIDTH;
         drawBorderForID(dragSourceID, sourceBorder, std::string{*PBGREFOC}, RND_FOC, sourceWidth);
     }
+
+    dropIntent = {};
+    dropIntentTargetID = -1;
 
     if (dragWindow && isTileValid(dragSourceID)) {
         const auto windowBox = dragWindow->getWindowMainSurfaceBox();
@@ -573,34 +609,54 @@ void COverview::fullRender() {
             const int maxProxyRound = std::max(0, (int)std::floor(std::min(proxy.w, proxy.h) / 2.0));
             const int autoRound     = std::min(RND_FOC, maxProxyRound);
             const int round         = **PDRAGPROXYROUND >= 0 ? std::min(std::max(0, (int)std::lround((double)**PDRAGPROXYROUND * pMonitor->m_scale)), maxProxyRound) : autoRound;
+
+            if (dragMoved && hoveredID != -1 && hoveredID != dragSourceID && isTileValid(hoveredID)) {
+                const int tx = hoveredID % SIDE_LENGTH;
+                const int ty = hoveredID / SIDE_LENGTH;
+                const Hyprexpo::SRect targetTileLocal{
+                    OUTER + tx * tileRenderSize.x + tx * GAPSIZE,
+                    OUTER + ty * tileRenderSize.y + ty * GAPSIZE,
+                    tileRenderSize.x,
+                    tileRenderSize.y,
+                };
+                dropIntent = Hyprexpo::computeDropIntentGeometry({
+                    .targetValid     = true,
+                    .pointerLocal    = {lastMousePosLocal.x, lastMousePosLocal.y},
+                    .targetTileLocal = targetTileLocal,
+                    .workspaceSize   = {pMonitor->m_size.x, pMonitor->m_size.y},
+                    .windowSize      = {windowBox.w, windowBox.h},
+                    .grabOffset      = {dragGrabOffset.x, dragGrabOffset.y},
+                });
+                dropIntentTargetID = dropIntent.valid ? hoveredID : -1;
+            }
+
+            if (dropIntent.valid) {
+                CBox targetProxy{
+                    dropIntent.targetProxyLocal.x,
+                    dropIntent.targetProxyLocal.y,
+                    dropIntent.targetProxyLocal.w,
+                    dropIntent.targetProxyLocal.h,
+                };
+                targetProxy.scale(pMonitor->m_scale).translate(pos->value());
+                targetProxy.round();
+
+                const int targetMaxRound = std::max(0, (int)std::floor(std::min(targetProxy.w, targetProxy.h) / 2.0));
+                const int targetRound    = **PDRAGPROXYROUND >= 0 ? std::min(std::max(0, (int)std::lround((double)**PDRAGPROXYROUND * pMonitor->m_scale)), targetMaxRound) :
+                                                                   std::min(RND_FOC, targetMaxRound);
+                Render::GL::g_pHyprOpenGL->renderRect(targetProxy, CHyprColor{(uint64_t)**PDRAGPROXYACTCOL}, {.round = targetRound, .roundingPower = ROUND_PWR});
+
+                const int   borderWidth   = **PDRAGPROXYBWIDTH >= 0 ? **PDRAGPROXYBWIDTH : std::max(2, (int)**PBWIDTH + 1);
+                const std::string effectiveSpec = std::string{*PDRAGPROXYBORDER}.empty() ? std::string{*PBCOLFOC} : std::string{*PDRAGPROXYBORDER};
+                drawProxyBorder(targetProxy, targetRound, borderWidth, effectiveSpec, std::string{*PBGREFOC});
+            }
+
             Render::GL::g_pHyprOpenGL->renderRect(proxy, CHyprColor{(uint64_t)(dragMoved ? **PDRAGPROXYACTCOL : **PDRAGPROXYCOL)}, {.round = round, .roundingPower = ROUND_PWR});
 
             const int   borderWidth   = **PDRAGPROXYBWIDTH >= 0 ? **PDRAGPROXYBWIDTH : std::max(2, (int)**PBWIDTH + 1);
             std::string effectiveSpec = std::string{*PDRAGPROXYBORDER}.empty() ? std::string{*PBCOLFOC} : std::string{*PDRAGPROXYBORDER};
             if (effectiveSpec.empty())
                 effectiveSpec = std::string{*PBGREFOC};
-            if (isGradientBorderSpec(effectiveSpec)) {
-                const auto spec = parseGradientSpec(effectiveSpec);
-                if (spec.valid) {
-                    Config::CGradientValueData grad;
-                    grad.m_colors.clear();
-                    grad.m_colors.push_back(spec.c1);
-                    grad.m_colors.push_back(spec.c2);
-                    grad.m_angle = spec.angleDeg * (float)M_PI / 180.f;
-                    grad.updateColorsOk();
-                    if (borderWidth > 0)
-                        Render::GL::g_pHyprOpenGL->renderBorder(proxy, grad, {.round = round, .roundingPower = ROUND_PWR, .borderSize = borderWidth});
-                }
-            } else if (!effectiveSpec.empty()) {
-                Hyprexpo::SColorRGBA parsedColor;
-                if (Hyprexpo::parseSolidColorSpec(effectiveSpec, parsedColor)) {
-                    Config::CGradientValueData grad{CHyprColor{parsedColor.r, parsedColor.g, parsedColor.b, parsedColor.a}};
-                    grad.updateColorsOk();
-                    if (borderWidth > 0)
-                        Render::GL::g_pHyprOpenGL->renderBorder(proxy, grad, {.round = round, .roundingPower = ROUND_PWR, .borderSize = borderWidth});
-                } else
-                    Log::logger->log(Log::ERR, "[hyprexpo] invalid drag_drop_proxy_border_color config: {}", effectiveSpec);
-            }
+            drawProxyBorder(proxy, round, borderWidth, effectiveSpec, std::string{*PBGREFOC});
         }
     }
 }

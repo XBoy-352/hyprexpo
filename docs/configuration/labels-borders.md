@@ -21,11 +21,16 @@ Deprecated fallback keys are still recognized for compatibility: `border_grad_cu
 
 ## Drag-Drop Window Styling
 
-Drag-drop window movement uses a translucent proxy under the pointer plus a
-source-workspace border while the move is active. By default those visuals keep
-the existing proxy colors and inherit the focused tile border; set the
-`drag_drop_*` keys when you want the window-moving feedback to match your
-theme.
+Drag-drop window movement uses a translucent proxy under the pointer, a
+source-workspace border, and a positional landing proxy inside the hovered
+target tile while the move is active. By default those visuals keep the existing
+proxy colors and inherit the focused tile border; set the `drag_drop_*` keys
+when you want the window-moving feedback to match your theme.
+
+The target-tile landing proxy is a visual drop-intent preview. It shows where
+the grabbed window would land based on pointer position and grab offset, but the
+current release behavior still uses Hyprland's safe workspace move path. Floating
+positional release and tiled layout-aware insertion are deferred follow-up work.
 
 | key | type | description | default |
 | --- | --- | --- | --- |

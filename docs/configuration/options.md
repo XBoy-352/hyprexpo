@@ -63,9 +63,13 @@ plugin {
 ## Drag-Drop Window Styling
 
 These options style the visual feedback shown while dragging a window between
-workspace previews. Empty border color values inherit the focused tile border,
-so the default look stays unchanged until you opt into drag/drop-specific
-styling.
+workspace previews. HyprExpo renders the under-pointer drag proxy and, while the
+pointer is over a valid target workspace, a positional landing proxy inside that
+target tile. Empty border color values inherit the focused tile border, so the
+default look stays unchanged until you opt into drag/drop-specific styling.
+
+The landing proxy is visual-only in this milestone. It previews drop intent; the
+actual release still uses the existing safe workspace move behavior.
 
 | key | type | description | default |
 | --- | --- | --- | --- |

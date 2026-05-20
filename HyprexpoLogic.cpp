@@ -54,6 +54,36 @@ int tileIndexFromPoint(double x, double y, double width, double height, int side
     return hx + hy * safeSide;
 }
 
+SDropIntentGeometry computeDropIntentGeometry(const SDropIntentInput& input) {
+    SDropIntentGeometry geometry;
+
+    if (!input.targetValid || input.targetTileLocal.w <= 0.0 || input.targetTileLocal.h <= 0.0 || input.workspaceSize.w <= 0.0 || input.workspaceSize.h <= 0.0 || input.windowSize.w <= 0.0 ||
+        input.windowSize.h <= 0.0)
+        return geometry;
+
+    const double ratioX = std::clamp((input.pointerLocal.x - input.targetTileLocal.x) / input.targetTileLocal.w, 0.0, 1.0);
+    const double ratioY = std::clamp((input.pointerLocal.y - input.targetTileLocal.y) / input.targetTileLocal.h, 0.0, 1.0);
+    const double scaleX = input.targetTileLocal.w / input.workspaceSize.w;
+    const double scaleY = input.targetTileLocal.h / input.workspaceSize.h;
+
+    const double minSize = std::max(0.0, input.minProxySize);
+    const double proxyW  = std::clamp(input.windowSize.w * scaleX, std::min(input.targetTileLocal.w, minSize), input.targetTileLocal.w);
+    const double proxyH  = std::clamp(input.windowSize.h * scaleY, std::min(input.targetTileLocal.h, minSize), input.targetTileLocal.h);
+    const double pointX  = input.targetTileLocal.x + ratioX * input.targetTileLocal.w;
+    const double pointY  = input.targetTileLocal.y + ratioY * input.targetTileLocal.h;
+
+    geometry.valid                = true;
+    geometry.targetWorkspacePoint = {ratioX * input.workspaceSize.w, ratioY * input.workspaceSize.h};
+    geometry.targetProxyLocal     = {
+        std::clamp(pointX - input.grabOffset.x * scaleX, input.targetTileLocal.x, input.targetTileLocal.x + input.targetTileLocal.w - proxyW),
+        std::clamp(pointY - input.grabOffset.y * scaleY, input.targetTileLocal.y, input.targetTileLocal.y + input.targetTileLocal.h - proxyH),
+        proxyW,
+        proxyH,
+    };
+
+    return geometry;
+}
+
 std::string fallbackTokenForVisibleIndex(int visibleIndex) {
     if (visibleIndex < 0)
         return "";

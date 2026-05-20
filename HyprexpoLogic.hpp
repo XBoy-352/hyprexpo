@@ -32,12 +32,46 @@ struct SWorkspaceMethodSpec {
     std::string          error;
 };
 
+struct SPoint {
+    double x = 0.0;
+    double y = 0.0;
+};
+
+struct SSize {
+    double w = 0.0;
+    double h = 0.0;
+};
+
+struct SRect {
+    double x = 0.0;
+    double y = 0.0;
+    double w = 0.0;
+    double h = 0.0;
+};
+
+struct SDropIntentInput {
+    bool   targetValid        = false;
+    SPoint pointerLocal       = {};
+    SRect  targetTileLocal    = {};
+    SSize  workspaceSize      = {};
+    SSize  windowSize         = {};
+    SPoint grabOffset         = {};
+    double minProxySize       = 24.0;
+};
+
+struct SDropIntentGeometry {
+    bool   valid                = false;
+    SPoint targetWorkspacePoint = {};
+    SRect  targetProxyLocal     = {};
+};
+
 std::string              trimString(std::string value);
 std::string              lowerString(std::string value);
 std::vector<std::string> splitCommaList(const std::string& value);
 
 int                      clampGridColumns(int columns);
 int                      tileIndexFromPoint(double x, double y, double width, double height, int sideLength);
+SDropIntentGeometry      computeDropIntentGeometry(const SDropIntentInput& input);
 
 std::string              fallbackTokenForVisibleIndex(int visibleIndex);
 int                      fallbackTokenToVisibleIndex(const std::string& token);

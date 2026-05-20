@@ -3,6 +3,7 @@
 #include "Overview.hpp"
 
 #include <string>
+#include <utility>
 #include <vector>
 
 struct SHyprGradientSpec {
@@ -45,9 +46,12 @@ SP<Render::ITexture> renderNumberTexture(const std::string& text, const CHyprCol
 
 SWorkspacePreviewState applyWorkspacePreviewState(const PHLWORKSPACE& workspace);
 void restoreWorkspacePreviewState(const PHLWORKSPACE& workspace, const SWorkspacePreviewState& state);
+std::vector<std::pair<PHLWORKSPACE, SWorkspacePreviewState>> applyExclusiveWorkspacePreviewState(const PHLWORKSPACE& workspace);
+void restoreWorkspacePreviewStates(const std::vector<std::pair<PHLWORKSPACE, SWorkspacePreviewState>>& states);
 
 bool windowVisibleOnWorkspace(const PHLWINDOW& window, const PHLWORKSPACE& workspace);
 void settleWorkspaceMoveAnimation(const PHLWINDOW& window);
+void settleWorkspaceMoveAnimations();
 void ensureFramebuffer(COverview::SWorkspaceImage& image, const CBox& monbox, uint32_t drmFormat);
 std::vector<SWindowPreviewState> applyWorkspaceWindowGoalState(const PHLWORKSPACE& workspace);
 void restoreWorkspaceWindowGoalState(const std::vector<SWindowPreviewState>& states);

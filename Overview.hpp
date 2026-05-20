@@ -3,6 +3,7 @@
 #define WLR_USE_UNSTABLE
 
 #include "globals.hpp"
+#include "HyprexpoLogic.hpp"
 #include <hyprland/src/desktop/DesktopTypes.hpp>
 #include <hyprland/src/render/Framebuffer.hpp>
 #include <hyprland/src/render/Texture.hpp>
@@ -115,6 +116,8 @@ class COverview {
     bool                         dragMoved      = false;
     Vector2D                     dragGrabOffset = Vector2D{};
     PHLWINDOW                    dragWindow;
+    int                          dropIntentTargetID = -1;
+    Hyprexpo::SDropIntentGeometry dropIntent;
 
     std::vector<int>             queuedRedrawIDs;
     std::vector<int>             settlingRedrawIDs;

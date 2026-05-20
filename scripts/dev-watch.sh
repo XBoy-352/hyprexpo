@@ -32,7 +32,7 @@ plugin {
     tile_rounding_current = 14
   }
 }
-bind = , F10, exec, hyprctl dispatch hyprexpo:expo toggle
+bind = , F10, hyprexpo:expo, toggle
 bind = SUPER, Return, exec, kitty
 bind = SUPER, Q, killactive
 bind = SUPER SHIFT, Q, exit
@@ -55,11 +55,11 @@ bind = SUPER SHIFT, 7, movetoworkspace, 7
 bind = SUPER SHIFT, 8, movetoworkspace, 8
 bind = SUPER SHIFT, 9, movetoworkspace, 9
 submap = hyprexpo
-  bind = , left,  exec, hyprctl dispatch hyprexpo:kb_focus left
-  bind = , right, exec, hyprctl dispatch hyprexpo:kb_focus right
-  bind = , up,    exec, hyprctl dispatch hyprexpo:kb_focus up
-  bind = , down,  exec, hyprctl dispatch hyprexpo:kb_focus down
-  bind = , return, exec, hyprctl dispatch hyprexpo:kb_confirm
+  bind = , left, hyprexpo:kb_focus, left
+  bind = , right, hyprexpo:kb_focus, right
+  bind = , up, hyprexpo:kb_focus, up
+  bind = , down, hyprexpo:kb_focus, down
+  bind = , return, hyprexpo:kb_confirm
 submap = reset
 EOF
 }
