@@ -465,12 +465,13 @@ static bool shouldShowCursorDuringOverview() {
     return **PSHOWCURSOR;
 }
 
-static void ensureOverviewCursorVisible(bool refreshPosition = false) {
+static void ensureOverviewCursorVisible(bool forceOverviewShape = false, bool refreshPosition = false) {
     if (!shouldShowCursorDuringOverview())
         return;
 
     g_pHyprRenderer->setCursorHidden(false);
-    g_pPointerManager->resetCursorImage();
+    if (forceOverviewShape)
+        Cursor::overrideController->setOverride("left_ptr", Cursor::CURSOR_OVERRIDE_UNKNOWN);
     if (refreshPosition)
         g_pInputManager->simulateMouseMovement();
 }
@@ -504,7 +505,7 @@ COverview::~COverview() {
     Render::GL::g_pHyprOpenGL->makeEGLCurrent();
     images.clear(); // otherwise we get a vram leak
     Cursor::overrideController->unsetOverride(Cursor::CURSOR_OVERRIDE_UNKNOWN);
-    ensureOverviewCursorVisible(true);
+    ensureOverviewCursorVisible(false, true);
     if (pMonitor)
         pMonitor->m_blurFBDirty = true;
     resetSubmapIfNeeded();
@@ -720,7 +721,7 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
 
     openedID = currentid;
 
-    ensureOverviewCursorVisible(true);
+    ensureOverviewCursorVisible(true, true);
 
     lastMousePosLocal = g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position;
     updateHoveredFromMouse();
@@ -730,7 +731,7 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
         if (closing)
             return;
 
-        ensureOverviewCursorVisible(false);
+        ensureOverviewCursorVisible();
 
         info.cancelled    = true;
         lastMousePosLocal = g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position;
