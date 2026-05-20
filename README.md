@@ -19,6 +19,12 @@ See the [upstream retirement context](https://github.com/hyprwm/hyprland-plugins
 and the [launch announcement](https://www.reddit.com/r/hyprland/comments/1o30dsg/hyprexpoplus_outer_gaps_keyboard_navigation_and/)
 for the project's well established background.
 
+## Related
+
+- https://github.com/colonelpanic8/hyprexpo - Another HyprExpo fork 
+
+__
+
 ## Install
 
 ### hyprpm
