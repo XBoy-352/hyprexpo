@@ -13,7 +13,7 @@ Hyprland plugins ecosystem. After the upstream plugin was retired from the
 official plugin set, this fork kept the idea maintained for current Hyprland
 releases instead of leaving users on stale plugin APIs.
 
-Born from a PR to the old officialy HyprExpo and formerly known as HyperExpo+ (`hyprexpo-plus`), has become the home for practical additions that made the
+Born from a PR to the old official HyprExpo and formerly known as HyperExpo+ (`hyprexpo-plus`), has become the home for practical additions that made the
 overview more usable day to day: keyboard navigation, visible workspace labels, configurable gaps and borders, multi-monitor placement, and Lua gesture setup.
 See the [upstream retirement context](https://github.com/hyprwm/hyprland-plugins/pull/507#issuecomment-4433386463)
 and the [launch announcement](https://www.reddit.com/r/hyprland/comments/1o30dsg/hyprexpoplus_outer_gaps_keyboard_navigation_and/)
