@@ -23,7 +23,7 @@ for the project's well established background.
 
 - https://github.com/colonelpanic8/hyprexpo - Another HyprExpo fork 
 
-__
+____
 
 ## Install
 
