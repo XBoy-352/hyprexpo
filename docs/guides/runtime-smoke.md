@@ -2,7 +2,7 @@
 
 Run these checks in a nested Hyprland session or another disposable compositor session before publishing a release.
 
-`scripts/run-nested.sh` launches a disposable nested session with a fresh user-owned build under `${XDG_CACHE_HOME:-$HOME/.cache}/hyprexpo-plus`.
+`scripts/run-nested.sh` launches a disposable nested session with a fresh user-owned build under `${XDG_CACHE_HOME:-$HOME/.cache}/hyprexpo`.
 
 `scripts/dev-watch.sh` rebuilds and relaunches that session on source changes.
 

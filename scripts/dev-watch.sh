@@ -6,7 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-BUILD_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/hyprexpo-plus"
+BUILD_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/hyprexpo"
 SO="${HYPREXPO_DEV_SO:-$BUILD_DIR/hyprexpo.so}"
 CONF="${XDG_CACHE_HOME:-$HOME/.cache}/hyprexpo-dev.conf"
 

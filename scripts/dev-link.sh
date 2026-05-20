@@ -15,7 +15,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
-build_dir="${XDG_CACHE_HOME:-$HOME/.cache}/hyprexpo-plus"
+build_dir="${XDG_CACHE_HOME:-$HOME/.cache}/hyprexpo"
 local_so="${HYPREXPO_DEV_SO:-$build_dir/hyprexpo.so}"
 target_so=""
 do_build=0
@@ -37,7 +37,7 @@ Usage:
   ./scripts/dev-link.sh -r              # restore original file from .bak and remove symlink
 
 Notes:
-- Local builds default to ${XDG_CACHE_HOME:-$HOME/.cache}/hyprexpo-plus/hyprexpo.so.
+- Local builds default to ${XDG_CACHE_HOME:-$HOME/.cache}/hyprexpo/hyprexpo.so.
 - This script only affects your local user install if hyprpm installed to XDG_DATA_HOME.
 - If your hyprexpo is system-wide, you may need sudo to replace it.
 EOF

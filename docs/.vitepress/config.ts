@@ -15,7 +15,7 @@ export default defineConfig({
       { text: "Docs", link: "/" },
       { text: "Install", link: "/getting-started/installation" },
       { text: "Config", link: "/configuration/options" },
-      { text: "GitHub", link: "https://github.com/sandwichfarm/hyprexpo-plus" },
+      { text: "GitHub", link: "https://github.com/sandwichfarm/hyprexpo" },
     ],
     sidebar: [
       {
@@ -56,7 +56,7 @@ export default defineConfig({
       provider: "local",
     },
     socialLinks: [
-      { icon: "github", link: "https://github.com/sandwichfarm/hyprexpo-plus" },
+      { icon: "github", link: "https://github.com/sandwichfarm/hyprexpo" },
     ],
     footer: {
       message: "HyprExpo is a maintained Hyprland plugin fork.",
