@@ -426,14 +426,22 @@ void normalizeMonitorWorkspaceRenderState(PHLMONITOR monitor) {
             continue;
 
         const bool active = workspace == monitor->m_activeWorkspace;
-        workspace->m_visible        = active;
         workspace->m_forceRendering = false;
-        workspace->m_alpha->resetAllCallbacks();
-        workspace->m_renderOffset->resetAllCallbacks();
-        workspace->m_alpha->setValueAndWarp(active ? 1.F : 0.F);
-        *workspace->m_alpha = active ? 1.F : 0.F;
-        workspace->m_renderOffset->setValueAndWarp(Vector2D{});
-        *workspace->m_renderOffset = Vector2D{};
+
+        if (active) {
+            workspace->m_visible = true;
+            g_pDesktopAnimationManager->startAnimation(workspace, CDesktopAnimationManager::ANIMATION_TYPE_IN, true, true);
+        } else if (!workspace->m_alpha->isBeingAnimated() && !workspace->m_renderOffset->isBeingAnimated()) {
+            workspace->m_visible = false;
+        }
+    }
+
+    for (const auto& window : g_pCompositor->m_windows) {
+        if (!window || !window->m_isMapped || window->isHidden() || window->m_pinned || !window->m_workspace || window->m_workspace->m_monitor != monitor)
+            continue;
+
+        window->alpha(Desktop::View::WINDOW_ALPHA_MOVE_FROM_WORKSPACE)->setValueAndWarp(1.F);
+        *window->alpha(Desktop::View::WINDOW_ALPHA_MOVE_FROM_WORKSPACE) = 1.F;
     }
 }
 
