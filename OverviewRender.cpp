@@ -72,7 +72,8 @@ void COverview::redrawID(int id, bool forcelowres) {
     const auto PWORKSPACE = image.pWorkspace ? image.pWorkspace : g_pCompositor->getWorkspaceByID(image.workspaceID);
     image.pWorkspace      = PWORKSPACE;
 
-    PHLWORKSPACE openSpecial = pMonitor->m_activeSpecialWorkspace;
+    const auto   restoreWorkspace = pMonitor->m_activeWorkspace;
+    PHLWORKSPACE openSpecial      = pMonitor->m_activeSpecialWorkspace;
     if (openSpecial)
         pMonitor->m_activeSpecialWorkspace.reset();
 
@@ -106,9 +107,14 @@ void COverview::redrawID(int id, bool forcelowres) {
     pMonitor->m_transformedSize = savedTransformedSize;
 
     pMonitor->m_activeSpecialWorkspace = openSpecial;
-    pMonitor->m_activeWorkspace        = startedOn;
-    startedOn->m_visible               = true;
-    g_pDesktopAnimationManager->startAnimation(startedOn, CDesktopAnimationManager::ANIMATION_TYPE_IN, true, true);
+
+    const auto activeWorkspace = restoreWorkspace ? restoreWorkspace : startedOn;
+    pMonitor->m_activeWorkspace = activeWorkspace;
+    if (activeWorkspace) {
+        activeWorkspace->m_visible = true;
+        if (activeWorkspace == startedOn)
+            g_pDesktopAnimationManager->startAnimation(activeWorkspace, CDesktopAnimationManager::ANIMATION_TYPE_IN, true, true);
+    }
 
     blockOverviewRendering = false;
 }
@@ -223,6 +229,16 @@ void COverview::onWorkspaceChange() {
 
 void COverview::render() {
     g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewPassElement>());
+}
+
+bool COverview::shouldRenderOverviewForMonitor(const PHLMONITOR& monitor) const {
+    if (pMonitor != monitor)
+        return false;
+
+    if (closing && pMonitor && pMonitor->m_activeWorkspace != startedOn)
+        return false;
+
+    return true;
 }
 
 void COverview::fullRender() {

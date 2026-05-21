@@ -30,6 +30,7 @@ class COverview {
     void onPreRender();
 
     void setClosing(bool closing);
+    bool shouldRenderOverviewForMonitor(const PHLMONITOR& monitor) const;
 
     void resetSwipe();
     void onSwipeUpdate(double delta);
