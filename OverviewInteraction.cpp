@@ -499,6 +499,23 @@ void COverview::setClosing(bool closing_) {
     closing = closing_;
 }
 
+void COverview::onWindowMoveToWorkspace(const PHLWINDOW& window, const PHLWORKSPACE& workspace) {
+    if (!closing || externalWorkspaceMoveDuringClose || !pMonitor || !window)
+        return;
+
+    const auto monitor = pMonitor.lock();
+    if (!monitor)
+        return;
+
+    const bool movedOnOverviewMonitor = window->m_monitor == monitor || (window->m_workspace && window->m_workspace->m_monitor == monitor) || (workspace && workspace->m_monitor == monitor);
+    if (!movedOnOverviewMonitor)
+        return;
+
+    externalWorkspaceMoveDuringClose = true;
+    damage();
+    g_pCompositor->scheduleFrameForMonitor(monitor);
+}
+
 void COverview::resetSwipe() {
     swipeWasCommenced = false;
 }

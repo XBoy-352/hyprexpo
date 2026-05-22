@@ -235,7 +235,7 @@ bool COverview::shouldRenderOverviewForMonitor(const PHLMONITOR& monitor) const 
     if (pMonitor != monitor)
         return false;
 
-    if (closing && pMonitor && pMonitor->m_activeWorkspace != startedOn)
+    if (closing && (externalWorkspaceMoveDuringClose || (pMonitor && pMonitor->m_activeWorkspace != startedOn)))
         return false;
 
     return true;

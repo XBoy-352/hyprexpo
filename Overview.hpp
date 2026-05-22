@@ -31,6 +31,7 @@ class COverview {
 
     void setClosing(bool closing);
     bool shouldRenderOverviewForMonitor(const PHLMONITOR& monitor) const;
+    void onWindowMoveToWorkspace(const PHLWINDOW& window, const PHLWORKSPACE& workspace);
 
     void resetSwipe();
     void onSwipeUpdate(double delta);
@@ -133,11 +134,13 @@ class COverview {
     PHLANIMVAR<Vector2D>         pos;
 
     bool                         closing = false;
+    bool                         externalWorkspaceMoveDuringClose = false;
 
     CHyprSignalListener          mouseMoveHook;
     CHyprSignalListener          mouseButtonHook;
     CHyprSignalListener          touchMoveHook;
     CHyprSignalListener          touchDownHook;
+    CHyprSignalListener          workspaceMoveHook;
 
     bool                         swipe             = false;
     bool                         swipeWasCommenced = false;
