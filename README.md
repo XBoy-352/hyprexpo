@@ -4,7 +4,7 @@ HyprExpo is a maintained Hyprland plugin for expose-style workspace overview wit
 
 If you experience any bugs, you are encouraged to [open an issue](https://github.com/sandwichfarm/hyprexpo/issues/new). Information I can use to reproduce a bug is appreciated. 
 
-[Docs (markdown)](docs/index.md) - [Docs (website)](http://hyprexpo.lol/docs/index.md) - [Announcement Post](https://www.reddit.com/r/hyprland/comments/1o30dsg/hyprexpoplus_outer_gaps_keyboard_navigation_and/)
+[Docs (markdown)](docs/index.md) - [Docs (website)](http://hyprexpo.lol/docs) - [Announcement Post](https://www.reddit.com/r/hyprland/comments/1o30dsg/hyprexpoplus_outer_gaps_keyboard_navigation_and/)
 
 ## History
 
