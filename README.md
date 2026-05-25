@@ -92,6 +92,7 @@ plugin {
         gesture_distance = 200
         cancel_key = escape
         show_cursor = 1
+        show_pinned_windows = 0
     }
 }
 ```

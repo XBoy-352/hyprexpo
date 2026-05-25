@@ -36,6 +36,7 @@ plugin {
     bg_col = rgb(101010)
     workspace_method = center current
     skip_empty = 0
+    show_pinned_windows = 0
 
     # borders (hypr-style gradient, thicker to showcase)
     border_style = hyprland

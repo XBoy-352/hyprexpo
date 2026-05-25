@@ -30,6 +30,24 @@ struct SWindowPreviewState {
     Vector2D  sizeGoal;
 };
 
+struct SPinnedWindowPreviewState {
+    PHLWINDOW   window;
+    PHLWORKSPACE workspace;
+    bool        pinned = false;
+};
+
+class CPinnedWindowPreviewGuard {
+  public:
+    explicit CPinnedWindowPreviewGuard(bool showPinnedWindows);
+    ~CPinnedWindowPreviewGuard();
+
+    CPinnedWindowPreviewGuard(const CPinnedWindowPreviewGuard&)            = delete;
+    CPinnedWindowPreviewGuard& operator=(const CPinnedWindowPreviewGuard&) = delete;
+
+  private:
+    std::vector<SPinnedWindowPreviewState> m_states;
+};
+
 void clearWithColor(const CHyprColor& color);
 uint32_t framebufferFormatWithAlpha(uint32_t drmFormat);
 bool isTransformRotated(wl_output_transform t);
@@ -50,6 +68,9 @@ std::vector<std::pair<PHLWORKSPACE, SWorkspacePreviewState>> applyExclusiveWorks
 void restoreWorkspacePreviewStates(const std::vector<std::pair<PHLWORKSPACE, SWorkspacePreviewState>>& states);
 void normalizeMonitorWorkspaceRenderState(PHLMONITOR monitor);
 
+bool showPinnedWindowsInPreview();
+std::vector<SPinnedWindowPreviewState> applyPinnedWindowPreviewState(bool showPinnedWindows);
+void restorePinnedWindowPreviewState(const std::vector<SPinnedWindowPreviewState>& states);
 bool windowVisibleOnWorkspace(const PHLWINDOW& window, const PHLWORKSPACE& workspace);
 void settleWorkspaceMoveAnimation(const PHLWINDOW& window);
 void settleWorkspaceMoveAnimations();

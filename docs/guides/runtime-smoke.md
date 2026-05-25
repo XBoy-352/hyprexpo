@@ -28,7 +28,11 @@ Nested test binds:
 9. Move the pointer within the target tile and between target tiles; confirm the landing proxy tracks the pointer position, preserves the original grab offset, and disappears when hovering the source or an invalid target.
 10. Release on a target workspace and confirm the window still moves through the existing safe workspace move behavior. This release is not yet a positional layout insertion.
 11. Exercise the Lua gesture registration path and complete or cancel a swipe.
-12. Unload or reload the plugin after closing overview and confirm no stale render pass callback crashes the session.
+12. Open or create a Picture-in-Picture-like pinned window. In the nested session, one practical path is to focus a test window and run `hyprctl dispatch pin` from a terminal.
+13. With the default `plugin:hyprexpo:show_pinned_windows = 0`, open overview and confirm the pinned window is not rendered into every workspace preview tile.
+14. Set `plugin:hyprexpo:show_pinned_windows = 1`, reload or apply the keyword, reopen overview, and confirm pinned windows render in previews again for users who opt in.
+15. Set `plugin:hyprexpo:show_pinned_windows = 0` again, close overview, and confirm the pinned window is still visible and pinned in the normal Hyprland session.
+16. Unload or reload the plugin after closing overview and confirm no stale render pass callback crashes the session.
 
 ::: warning
 The public site and docs should not claim full release readiness until this runtime smoke gate has been completed for the intended release artifact.

@@ -40,6 +40,9 @@ plugin {
 | `plugin:hyprexpo:gesture_distance` | int | swipe distance considered complete | `200` |
 | `plugin:hyprexpo:cancel_key` | string | comma-separated key names that close overview without selecting; `none` or `off` disables | `escape` |
 | `plugin:hyprexpo:show_cursor` | bool int | keep the cursor visible while overview is open; set `0` for old hidden-cursor behavior | `1` |
+| `plugin:hyprexpo:show_pinned_windows` | bool int | render pinned/PiP windows in workspace preview thumbnails; default `0` hides them from previews only | `0` |
+
+Pinned windows, including browser Picture-in-Picture windows, stay pinned and visible in normal Hyprland. By default HyprExpo hides them only while capturing workspace preview thumbnails so they do not appear on every tile. Set `show_pinned_windows = 1` to opt in to the old preview behavior.
 
 ## Tile Appearance
 
@@ -196,6 +199,6 @@ Then bind `hyprexpo:kb_select` to those tokens in the overview submap.
 ## Safe Failure Behavior
 
 Invalid `columns`, workspace methods, label tokens, border colors, drag/drop
-border colors, and gradient values are expected to fail safely. The plugin
-should log invalid values or use a fallback instead of crashing Hyprland during
-render.
+border colors, gradient values, and bool-int options are expected to fail
+safely. The plugin should log invalid values or use a fallback instead of
+crashing Hyprland during render.

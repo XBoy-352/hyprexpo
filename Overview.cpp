@@ -123,6 +123,7 @@ static Config::INTEGER intDefault(const std::string& name) {
         {"plugin:hyprexpo:bg_col", HyprexpoConfig::BG_COL_DEFAULT},
         {"plugin:hyprexpo:gesture_distance", HyprexpoConfig::GESTURE_DISTANCE_DEFAULT},
         {"plugin:hyprexpo:show_cursor", HyprexpoConfig::SHOW_CURSOR_DEFAULT},
+        {"plugin:hyprexpo:show_pinned_windows", HyprexpoConfig::SHOW_PINNED_WINDOWS_DEFAULT},
         {"plugin:hyprexpo:max_workspace", HyprexpoConfig::MAX_WORKSPACE_DEFAULT},
         {"plugin:hyprexpo:show_workspace_numbers", HyprexpoConfig::SHOW_WORKSPACE_NUMBERS_DEFAULT},
         {"plugin:hyprexpo:workspace_number_color", HyprexpoConfig::WORKSPACE_NUMBER_COLOR_DEFAULT},
@@ -443,6 +444,49 @@ void normalizeMonitorWorkspaceRenderState(PHLMONITOR monitor) {
         window->alpha(Desktop::View::WINDOW_ALPHA_MOVE_FROM_WORKSPACE)->setValueAndWarp(1.F);
         *window->alpha(Desktop::View::WINDOW_ALPHA_MOVE_FROM_WORKSPACE) = 1.F;
     }
+}
+
+bool showPinnedWindowsInPreview() {
+    static auto* const* PSHOWPINNED = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:show_pinned_windows")->getDataStaticPtr();
+    return **PSHOWPINNED != 0;
+}
+
+std::vector<SPinnedWindowPreviewState> applyPinnedWindowPreviewState(bool showPinnedWindows) {
+    std::vector<SPinnedWindowPreviewState> states;
+    if (showPinnedWindows)
+        return states;
+
+    for (const auto& window : g_pCompositor->m_windows) {
+        if (!window || !window->m_isMapped || !window->m_pinned)
+            continue;
+
+        states.push_back({
+            .window = window,
+            .workspace = window->m_workspace,
+            .pinned = window->m_pinned,
+        });
+
+        window->m_pinned = false;
+        window->m_workspace.reset();
+    }
+
+    return states;
+}
+
+void restorePinnedWindowPreviewState(const std::vector<SPinnedWindowPreviewState>& states) {
+    for (const auto& state : states) {
+        if (!state.window)
+            continue;
+
+        state.window->m_workspace = state.workspace;
+        state.window->m_pinned    = state.pinned;
+    }
+}
+
+CPinnedWindowPreviewGuard::CPinnedWindowPreviewGuard(bool showPinnedWindows) : m_states(applyPinnedWindowPreviewState(showPinnedWindows)) {}
+
+CPinnedWindowPreviewGuard::~CPinnedWindowPreviewGuard() {
+    restorePinnedWindowPreviewState(m_states);
 }
 
 bool windowVisibleOnWorkspace(const PHLWINDOW& window, const PHLWORKSPACE& workspace) {
@@ -769,7 +813,10 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
             if (PWORKSPACE == startedOn)
                 PMONITOR->m_activeSpecialWorkspace = openSpecial;
 
-            g_pHyprRenderer->renderWorkspace(PMONITOR, PWORKSPACE, Time::steadyNow(), monbox);
+            {
+                CPinnedWindowPreviewGuard pinnedWindowPreviewGuard{showPinnedWindowsInPreview()};
+                g_pHyprRenderer->renderWorkspace(PMONITOR, PWORKSPACE, Time::steadyNow(), monbox);
+            }
 
             restoreWorkspaceWindowGoalState(windowState);
             restoreWorkspacePreviewStates(previewStates);
@@ -778,8 +825,10 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
 
             if (PWORKSPACE == startedOn)
                 PMONITOR->m_activeSpecialWorkspace.reset();
-        } else
+        } else {
+            CPinnedWindowPreviewGuard pinnedWindowPreviewGuard{showPinnedWindowsInPreview()};
             g_pHyprRenderer->renderWorkspace(PMONITOR, PWORKSPACE, Time::steadyNow(), monbox);
+        }
 
         image.box = {(i % SIDE_LENGTH) * tileRenderSize.x + (i % SIDE_LENGTH) * GAP_WIDTH, (i / SIDE_LENGTH) * tileRenderSize.y + (i / SIDE_LENGTH) * GAP_WIDTH, tileRenderSize.x,
                      tileRenderSize.y};

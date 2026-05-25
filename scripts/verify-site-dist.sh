@@ -31,6 +31,7 @@ require_grep "github.com/sandwichfarm/hyprexpo" dist/index.html
 require_grep "github.com/user-attachments/assets/861baa26-46b6-4fa8-8d37-65cbb9ecbed4" dist/index.html
 require_grep "drag-drop window movement" dist/index.html
 require_grep "plugin:hyprexpo:show_cursor" dist/docs
+require_grep "plugin:hyprexpo:show_pinned_windows" dist/docs
 require_grep "plugin:hyprexpo:tile_rounding" dist/docs/configuration/options/index.html
 require_grep "plugin:hyprexpo:border_color_current" dist/docs/configuration/options/index.html
 require_grep "plugin:hyprexpo:drag_drop_proxy_color" dist/docs/configuration/options/index.html

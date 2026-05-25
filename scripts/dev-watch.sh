@@ -30,6 +30,7 @@ plugin {
     tile_rounding = 12
     tile_rounding_focus = 16
     tile_rounding_current = 14
+    show_pinned_windows = 0
   }
 }
 bind = , F10, hyprexpo:expo, toggle
