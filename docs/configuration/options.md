@@ -26,6 +26,28 @@ plugin {
 }
 ```
 
+In `hyprland.lua`, use `hl.config()` with a nested `plugin.hyprexpo` table:
+
+```lua
+hl.config({
+    plugin = {
+        hyprexpo = {
+            columns = 3,
+            gaps_in = 5,
+            gaps_out = 0,
+            bg_col = "rgb(111111)",
+            workspace_method = "center current",
+            keynav_enable = 1,
+            label_enable = 1,
+            border_width = 2,
+        },
+    },
+})
+```
+
+`hl.plugin.hyprexpo` is the Lua helper namespace for dispatchers and gestures;
+it is not the configuration block.
+
 ## Layout and Behavior
 
 | key | type | description | default |

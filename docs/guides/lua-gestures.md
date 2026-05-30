@@ -12,6 +12,32 @@ hl.plugin.hyprexpo.kb_selectn(1)
 hl.plugin.hyprexpo.kb_select("1")
 ```
 
+## Plugin Configuration
+
+Configure HyprExpo options with `hl.config()` and a nested `plugin.hyprexpo`
+table:
+
+```lua
+hl.config({
+    plugin = {
+        hyprexpo = {
+            columns = 3,
+            gaps_in = 5,
+            gaps_out = 0,
+            bg_col = "rgb(111111)",
+            workspace_method = "center current",
+            gesture_distance = 200,
+            cancel_key = "escape",
+            show_cursor = 1,
+        },
+    },
+})
+```
+
+The `hl.plugin.hyprexpo` table shown above is for helper functions such as
+`expo`, `kb_focus`, and `gesture`. Calling it as a function, or passing the
+configuration table to `hl.plugin.hyprexpo.expo`, will raise a Lua type error.
+
 ## Keyboard Submap
 
 Lua configs define submaps with Hyprland's Lua API. If you want modifierless
