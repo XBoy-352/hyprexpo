@@ -230,6 +230,8 @@ bool COverview::finishWindowDrag() {
     if (!WINDOW || !MOVED)
         return false;
 
+    // Drag proxies are render-only; repaint even when release does not move workspace contents.
+    damage();
     updateHoveredFromMouse();
 
     const int TARGET = hoveredID;
