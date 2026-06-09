@@ -9,7 +9,6 @@
 #include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/config/shared/actions/ConfigActions.hpp>
 #include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
-#include <hyprland/src/helpers/math/Math.hpp>
 #include <hyprland/src/managers/animation/DesktopAnimationManager.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
@@ -113,9 +112,9 @@ void COverview::redrawID(int id, bool forcelowres) {
     MON->m_pixelSize       = savedPixelSize;
     MON->m_transformedSize = savedTransformedSize;
 
-    // Capture normalizes monitor geometry; preserve the real output direction on the texture.
+    // Capture normalizes rotated monitor geometry; Hyprland's output path adds one more half-turn.
     if (const auto texture = image.fb->getTexture(); texture)
-        texture->m_transform = Math::wlTransformToHyprutils(Math::invertTransform(savedTransform));
+        texture->m_transform = isTransformRotated(savedTransform) ? HYPRUTILS_TRANSFORM_180 : HYPRUTILS_TRANSFORM_NORMAL;
 
     MON->m_activeSpecialWorkspace = openSpecial;
 
