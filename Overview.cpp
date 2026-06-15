@@ -570,6 +570,24 @@ static void recalculateWorkspaceLayout(const PHLWORKSPACE& workspace) {
         workspace->m_space->recalculate(Layout::RECALCULATE_REASON_WORKSPACE_CHANGE);
 }
 
+// AI-GENERATED SPECULATIVE FIX — see README "AI-generated fixes (unofficial fork)".
+// Rendering a preview tile temporarily makes `previewedWorkspace` the preview monitor's
+// active workspace and recalculates the layout against THAT monitor. For a workspace that
+// actually lives on a different monitor (multi-monitor setups), this recomputes its
+// Layout::CSpace against the wrong monitor and can leave its fullscreen/geometry
+// bookkeeping inconsistent. A later real fullscreen request then recalculates that space
+// and crashes with std::bad_variant_access inside Layout::CAlgorithm::recalculate
+// (observed on Hyprland 0.55.4 during an XWayland fullscreen request + DP output hotplug).
+// Recalculating the previewed workspace once more — after the preview monitor's active
+// workspace has been restored — re-synchronises it to its own monitor's context.
+// This is an unverified, defensive mitigation and may not fully resolve the crash.
+void resyncPreviewedWorkspaceLayout(const PHLWORKSPACE& previewedWorkspace, const PHLWORKSPACE& restoredWorkspace) {
+    if (!previewedWorkspace || previewedWorkspace == restoredWorkspace)
+        return;
+
+    recalculateWorkspaceLayout(previewedWorkspace);
+}
+
 PHLWORKSPACE activateWorkspaceForPreview(PHLMONITOR monitor, const PHLWORKSPACE& workspace) {
     if (!monitor)
         return nullptr;
@@ -821,6 +839,7 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
             restoreWorkspaceWindowGoalState(windowState);
             restoreWorkspacePreviewStates(previewStates);
             restoreActiveWorkspaceAfterPreview(PMONITOR, previousWS);
+            resyncPreviewedWorkspaceLayout(PWORKSPACE, previousWS); // AI-generated speculative fix (see README)
             startedOn->m_visible = false;
 
             if (PWORKSPACE == startedOn)

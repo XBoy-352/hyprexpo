@@ -1,5 +1,33 @@
 # HyprExpo
 
+> # ⚠️ UNOFFICIAL AI-GENERATED FIXES FORK — PLEASE READ FIRST
+>
+> **This is a personal, unofficial fork. It is NOT the real HyprExpo, and I am NOT a maintainer of HyprExpo.**
+>
+> I'm just a regular user who hit a crash on **Hyprland 0.55.4** and had an AI assistant
+> (Claude / Claude Code) generate some **quick, speculative, essentially untested patches** to try to
+> work around it *until the actual maintainers ship a real fix.*
+>
+> - 🤖 **The fix commits in this fork were written by an LLM** — not by me, and not by the HyprExpo maintainers.
+> - 🧪 **They are UNTESTED beyond "it compiles and the unit tests pass."** They have **not** been
+>   runtime-verified, code-reviewed, or QA'd in a real session. They may not fix anything. They may
+>   introduce **new bugs, crashes, freezes, or data loss.**
+> - 🎯 **They are best-effort *guesses*** at the root cause, derived from static analysis of a crash
+>   backtrace. The crash is not reliably reproducible, so I **cannot promise these patches help at all.**
+> - 🚫 **No warranty of any kind. Use entirely at your own risk.** If your compositor crashes or your
+>   session dies, that is on you — not on me, and absolutely not on the upstream HyprExpo maintainers.
+> - 📦 **This is a throwaway, "for fun" temporary stopgap**, meant to be discarded the moment upstream
+>   ships a proper fix.
+> - 👉 **For the real, supported, actually-maintained plugin, use the upstream repo instead:**
+>   **<https://github.com/sandwichfarm/hyprexpo>** — go there for actual fixes.
+> - 🐛 **Do NOT report problems from this fork to the upstream maintainers.** Any breakage here comes
+>   from the AI patches, not from their code.
+>
+> 📄 See **[AI-GENERATED-FIXES.md](AI-GENERATED-FIXES.md)** for exactly what was changed, the crash
+> analysis, and why each change is speculative.
+>
+> ---
+
 HyprExpo is a maintained Hyprland plugin for expose-style workspace overview with keyboard selection, drag-drop window movement, labels, configurable gaps and borders, multi-monitor placement, and Lua gestures.
 
 If you experience any bugs, you are encouraged to [open an issue](https://github.com/sandwichfarm/hyprexpo/issues/new). Information I can use to reproduce a bug is appreciated. 

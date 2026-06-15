@@ -96,6 +96,7 @@ void COverview::redrawID(int id, bool forcelowres) {
         restoreWorkspaceWindowGoalState(windowState);
         restoreWorkspacePreviewStates(previewStates);
         restoreActiveWorkspaceAfterPreview(MON, previousWS);
+        resyncPreviewedWorkspaceLayout(PWORKSPACE, previousWS); // AI-generated speculative fix (see README)
 
         if (PWORKSPACE == startedOn)
             MON->m_activeSpecialWorkspace.reset();

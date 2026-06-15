@@ -79,4 +79,7 @@ std::vector<SWindowPreviewState> applyWorkspaceWindowGoalState(const PHLWORKSPAC
 void restoreWorkspaceWindowGoalState(const std::vector<SWindowPreviewState>& states);
 PHLWORKSPACE activateWorkspaceForPreview(PHLMONITOR monitor, const PHLWORKSPACE& workspace);
 void restoreActiveWorkspaceAfterPreview(PHLMONITOR monitor, const PHLWORKSPACE& workspace);
+// AI-GENERATED SPECULATIVE FIX (unofficial fork) — re-synchronise a workspace's layout
+// after it was previewed on a foreign monitor. See README "AI-generated fixes".
+void resyncPreviewedWorkspaceLayout(const PHLWORKSPACE& previewedWorkspace, const PHLWORKSPACE& restoredWorkspace);
 void removeOverview(WP<Hyprutils::Animation::CBaseAnimatedVariable> thisptr);

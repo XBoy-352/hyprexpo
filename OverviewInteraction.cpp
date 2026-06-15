@@ -540,6 +540,15 @@ void COverview::onSwipeUpdate(double delta) {
         return;
     }
 
+    // AI-GENERATED SPECULATIVE FIX — see README "AI-generated fixes (unofficial fork)".
+    // Hardens the related, still-open gesture re-entry crash (issue #57): a swipe
+    // re-triggered while the overview is tearing down could reach setValueAndWarp() on
+    // already-released animated variables. Untested; defensive only.
+    if (!size || !pos) {
+        m_isSwiping = false;
+        return;
+    }
+
     if (swipeWasCommenced)
         return;
 
@@ -569,6 +578,14 @@ void COverview::onSwipeEnd() {
         swipeWasCommenced = false;
         closing           = true;
         g_pOverview.reset();
+        return;
+    }
+
+    // AI-GENERATED SPECULATIVE FIX (see README): avoid dereferencing released animated
+    // variables if a gesture ends while the overview is tearing down (issue #57).
+    if (!size || !pos) {
+        m_isSwiping       = false;
+        swipeWasCommenced = false;
         return;
     }
 
