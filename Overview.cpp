@@ -902,10 +902,21 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
         if (closing)
             return;
 
+        // AI-GENERATED SPECULATIVE FIX — see README "AI-generated fixes (unofficial fork)".
+        // pMonitor is a WEAK ref and the overview's monitor can be unplugged while open. The
+        // original code dereferenced pMonitor->m_position raw, so a mouse move after the
+        // monitor was removed read a freed CMonitor and SIGSEGV'd inside Vector2D::operator-
+        // (confirmed via addr2line at Overview.cpp:908 on a real crash report). Lock first and
+        // bail if the monitor is gone — matching the pMonitor.lock() guards used everywhere
+        // else after upstream #50. This one input callback was simply missed.
+        const auto MON = pMonitor.lock();
+        if (!MON)
+            return;
+
         ensureOverviewCursorVisible();
 
         info.cancelled    = true;
-        lastMousePosLocal = g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position;
+        lastMousePosLocal = g_pInputManager->getMouseCoordsInternal() - MON->m_position;
         updateHoveredFromMouse();
         updateWindowDrag();
     };

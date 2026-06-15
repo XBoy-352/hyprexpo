@@ -90,6 +90,35 @@ close-animation behaviour) but is also **unverified** against the actual #57 rep
 
 ---
 
+## Crash #3 (the real repeat offender) — dangling monitor in the mouse-move callback
+
+### Symptom
+`SIGSEGV` inside `Hyprutils::Math::Vector2D::operator-`, called from the overview's cursor-move
+callback, when the monitor the overview is open on is **unplugged**. Reproduced deterministically:
+open the grid on an external monitor, then disconnect it.
+
+### Root cause (confirmed, not speculative)
+`addr2line` on the crashing `hyprexpo.so` pinned it to **`Overview.cpp:908`**:
+```cpp
+lastMousePosLocal = g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position;
+```
+`pMonitor` is a **weak** reference (`PHLMONITORREF`). This input callback dereferenced it **raw** —
+no `.lock()`. When the monitor is removed, Hyprland repositions the cursor (`CPointerManager::
+closestValid → onMouseMoved`), which fires this callback; `pMonitor->m_position` then reads a freed
+`CMonitor` and segfaults. Upstream's #50 added `pMonitor.lock()` guards across the overview, but
+**this one input callback was missed.**
+
+### Fix (high-confidence)
+Lock `pMonitor` at the top of the callback and bail if the monitor is gone, then use the locked
+`MON->m_position` — exactly the pattern used everywhere else in the file:
+```cpp
+const auto MON = pMonitor.lock();
+if (!MON)
+    return;
+```
+This is a textbook dangling-weak-pointer guard, not a guess — the addr2line line, the surrounding
+`lock()` usage, and the crash backtrace all agree.
+
 ## Files changed
 
 | File | Change |
