@@ -1,3 +1,16 @@
+# ⚠️ Unofficial fork — disclaimer (read first)
+
+This is **`XBoy-352/hyprexpo`**, an unofficial fork of [`sandwichfarm/hyprexpo`](https://github.com/sandwichfarm/hyprexpo) that tracks upstream and carries a few extra fixes on top.
+
+The changes in this fork were **AI-generated (Claude / Claude Code)** at a user's request and have **NOT been reviewed or battle-tested by an experienced C++ / Hyprland developer.** They compile against the current Hyprland headers and pass the unit-test suite, and the fix below has been confirmed working once in a real session — but there is **no warranty, use at your own risk**, and they could introduce new bugs or crashes. **Do not report bugs caused by this fork to upstream.** For the maintained, properly-reviewed plugin, use [`sandwichfarm/hyprexpo`](https://github.com/sandwichfarm/hyprexpo).
+
+# Fixes added over upstream
+
+- **SIGSEGV when an external monitor is unplugged while the overview grid is open** (commit [`168d442`](https://github.com/XBoy-352/hyprexpo/commit/168d442e27dfdd17c08aeb1e1b72e5f5a7f14ba4)).
+  The overview's cursor-move callback dereferenced a weak `pMonitor` raw. When the monitor the grid is open on is removed, Hyprland frees that `CMonitor` and repositions the pointer (`CPointerManager::closestValid` → `CInputManager::mouseMoveUnified`), which fires this callback; reading `pMonitor->m_position` then hits freed memory and crashes in `Hyprutils::Math::Vector2D::operator-`. The fix locks the monitor and bails if it's gone — the same `pMonitor.lock()` guard upstream's #50 applied across the overview, but had missed on this one input callback.
+
+---
+
 # HyprExpo
 
 HyprExpo is a maintained Hyprland plugin for expose-style workspace overview with keyboard selection, drag-drop window movement, labels, configurable gaps and borders, multi-monitor placement, and Lua gestures.
