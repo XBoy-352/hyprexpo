@@ -895,10 +895,19 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
         if (closing)
             return;
 
+        // The overview's monitor can be unplugged while the grid is open. pMonitor is a weak
+        // ref and Hyprland repositions the pointer on output removal (CPointerManager::closestValid
+        // -> CInputManager::mouseMoveUnified), which fires this callback. Lock the monitor first and
+        // bail if it is gone, so we never read m_position from a freed CMonitor (SIGSEGV in
+        // Vector2D::operator-). Mirrors the lock guards added in #50; this input callback was missed.
+        const auto MON = pMonitor.lock();
+        if (!MON)
+            return;
+
         ensureOverviewCursorVisible();
 
         info.cancelled    = true;
-        lastMousePosLocal = g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position;
+        lastMousePosLocal = g_pInputManager->getMouseCoordsInternal() - MON->m_position;
         updateHoveredFromMouse();
         updateWindowDrag();
     };
