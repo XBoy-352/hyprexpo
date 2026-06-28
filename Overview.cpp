@@ -970,6 +970,10 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
             // intent (right button OR Shift => pull onto current monitor; plain left => focus owner).
             if (event.state == WL_POINTER_BUTTON_STATE_PRESSED)
                 return;
+            // Only left/right releases drive click intent; ignore middle/side buttons so they
+            // don't fall through as FocusOwner and activate the hovered workspace.
+            if (event.button != BTN_LEFT && event.button != BTN_RIGHT)
+                return;
 
             const bool rightButton = event.button == BTN_RIGHT;
             m_pullToCurrent        = Hyprexpo::resolveClickIntent(rightButton, shiftModifierHeld()) == Hyprexpo::EClickIntent::PullToCurrent;
@@ -1021,8 +1025,12 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
             // Defer that teardown to the next event-loop tick; re-check the global since the overview
             // may have been reset by then.
             if (!mon || mon == pMonitor.lock()) {
-                g_pEventLoopManager->doLater([]() {
-                    if (g_pOverview)
+                // Capture this instance's identity: if our overview is torn down and a *new* one
+                // opens before doLater runs, the global will point at a different object — only
+                // close when it's still us (compare-only; never dereference the captured pointer).
+                auto* const self = this;
+                g_pEventLoopManager->doLater([self]() {
+                    if (g_pOverview && g_pOverview.get() == self)
                         g_pOverview->close(false);
                 });
                 return;
