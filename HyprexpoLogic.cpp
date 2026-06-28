@@ -272,6 +272,28 @@ SWorkspaceMethodSpec parseWorkspaceMethodSpec(const std::string& method) {
     return spec;
 }
 
+std::vector<int64_t> allMonitorsCellWorkspaceIDs(int tileCount) {
+    std::vector<int64_t> ids;
+    if (tileCount <= 0)
+        return ids;
+
+    ids.reserve(static_cast<size_t>(tileCount));
+    for (int i = 0; i < tileCount; ++i)
+        ids.push_back(static_cast<int64_t>(i) + 1);
+
+    return ids;
+}
+
+int allMonitorsOpenIndex(int64_t startedOnID, int tileCount) {
+    if (tileCount > 0 && startedOnID >= 1 && startedOnID <= static_cast<int64_t>(tileCount))
+        return static_cast<int>(startedOnID - 1);
+    return 0;
+}
+
+EClickIntent resolveClickIntent(bool rightButton, bool shiftHeld) {
+    return (rightButton || shiftHeld) ? EClickIntent::PullToCurrent : EClickIntent::FocusOwner;
+}
+
 SWorkspaceMethodSpec resolveWorkspaceMethodForMonitor(const std::string& config, const std::string& monitorName) {
     const std::string trimmed = trimString(config);
     if (trimmed.empty())

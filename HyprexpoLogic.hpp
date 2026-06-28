@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -83,5 +84,19 @@ bool                     isGradientBorderSpec(const std::string& value);
 
 SWorkspaceMethodSpec     parseWorkspaceMethodSpec(const std::string& method);
 SWorkspaceMethodSpec     resolveWorkspaceMethodForMonitor(const std::string& config, const std::string& monitorName);
+
+// --- all_monitors (consolidated all-workspaces overview) pure decisions -------------------------
+// Enumerate the global workspace IDs that fill the N grid cells: {1, 2, ..., tileCount}.
+std::vector<int64_t>     allMonitorsCellWorkspaceIDs(int tileCount);
+// Index of the workspace the overview opened on (startedOnID) inside the 1..tileCount enumeration,
+// else 0. Clarity helper for the capture-loop currentid seed (not correctness-load-bearing).
+int                      allMonitorsOpenIndex(int64_t startedOnID, int tileCount);
+
+enum class EClickIntent {
+    FocusOwner,    // path (a): focus the workspace's owner monitor and switch there
+    PullToCurrent, // path (b): pull the workspace onto the current monitor
+};
+// right button OR Shift+left => PullToCurrent; plain left => FocusOwner.
+EClickIntent             resolveClickIntent(bool rightButton, bool shiftHeld);
 
 }

@@ -24,12 +24,15 @@
 #include <hyprland/src/managers/eventLoop/EventLoopTimer.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/managers/PointerManager.hpp>
+#include <hyprland/src/managers/SeatManager.hpp>
+#include <hyprland/src/devices/IKeyboard.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
 #include <hyprland/src/helpers/varlist/VarList.hpp>
 #include <hyprland/src/helpers/Format.hpp>
 #include <drm_fourcc.h>
 #undef private
 #undef protected
+#include <linux/input-event-codes.h>
 #include "OverviewPassElement.hpp"
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
@@ -125,6 +128,7 @@ static Config::INTEGER intDefault(const std::string& name) {
         {"plugin:hyprexpo:show_cursor", HyprexpoConfig::SHOW_CURSOR_DEFAULT},
         {"plugin:hyprexpo:show_pinned_windows", HyprexpoConfig::SHOW_PINNED_WINDOWS_DEFAULT},
         {"plugin:hyprexpo:max_workspace", HyprexpoConfig::MAX_WORKSPACE_DEFAULT},
+        {"plugin:hyprexpo:all_monitors", HyprexpoConfig::ALL_MONITORS_DEFAULT},
         {"plugin:hyprexpo:show_workspace_numbers", HyprexpoConfig::SHOW_WORKSPACE_NUMBERS_DEFAULT},
         {"plugin:hyprexpo:workspace_number_color", HyprexpoConfig::WORKSPACE_NUMBER_COLOR_DEFAULT},
         {"plugin:hyprexpo:keynav_enable", HyprexpoConfig::KEYNAV_ENABLE_DEFAULT},
@@ -417,6 +421,10 @@ void restoreWorkspacePreviewStates(const std::vector<std::pair<PHLWORKSPACE, SWo
         restoreWorkspacePreviewState(workspace, state);
 }
 
+// NOTE (all_monitors): this teardown only normalizes workspaces whose m_monitor == monitor (see the
+// guards below at the workspace and window loops). Foreign workspaces shown in the consolidated grid
+// are therefore NOT fixed here — their correctness depends entirely on the per-cell apply/restore in
+// the capture loop and redrawID. Do not optimize that per-cell restore away.
 void normalizeMonitorWorkspaceRenderState(PHLMONITOR monitor) {
     if (!monitor || !monitor->m_activeWorkspace)
         return;
@@ -628,6 +636,15 @@ static void ensureOverviewCursorVisible(bool forceOverviewShape = false, bool re
         g_pInputManager->simulateMouseMovement();
 }
 
+// Live Shift query for all_monitors click routing. IPointer::SButtonEvent carries no modifier
+// mask, so mirror the keybind path and read the active keyboard's modifiers directly.
+static bool shiftModifierHeld() {
+    if (!g_pSeatManager)
+        return false;
+    const auto KB = g_pSeatManager->m_keyboard.lock();
+    return KB && (KB->getModifiers() & HL_MODIFIER_SHIFT);
+}
+
 // Get workspace method configuration for a specific monitor
 // Returns pair of {isCenter, startWorkspaceID}
 static std::pair<bool, int> getWorkspaceMethodForMonitor(PHLMONITOR monitor) {
@@ -675,16 +692,27 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
     static auto* const* PSKIP    = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:skip_empty")->getDataStaticPtr();
     static auto* const* PMAXWS   = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:max_workspace")->getDataStaticPtr();
     static auto* const* PSHOWNUM = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:show_workspace_numbers")->getDataStaticPtr();
+    static auto* const* PALLMON  = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:all_monitors")->getDataStaticPtr();
 
     SIDE_LENGTH          = Hyprexpo::clampGridColumns(**PCOLUMNS);
     GAP_WIDTH            = std::max<Hyprlang::INT>(0, **PGAPS);
     BG_COLOR             = **PCOL;
     showWorkspaceNumbers = **PSHOWNUM;
-
-    // Get workspace method for this specific monitor
-    auto [methodCenter, methodStartID] = getWorkspaceMethodForMonitor(pMonitor.lock());
+    m_allMonitors        = **PALLMON != 0;
 
     images.resize(SIDE_LENGTH * SIDE_LENGTH);
+
+    if (m_allMonitors) {
+        // Consolidated all-workspaces overview: enumerate global workspace IDs 1..N into the cells
+        // regardless of which physical monitor owns each. "Which workspace ID belongs in cell i" is
+        // the only structurally single-monitor decision; everything downstream works by ID. Do NOT
+        // call CWorkspace::create and do NOT reassign pMonitor->m_activeWorkspace here.
+        const auto ALLIDS = Hyprexpo::allMonitorsCellWorkspaceIDs((int)images.size());
+        for (size_t i = 0; i < images.size(); ++i)
+            images[i].workspaceID = ALLIDS[i];
+    } else {
+    // Get workspace method for this specific monitor
+    auto [methodCenter, methodStartID] = getWorkspaceMethodForMonitor(pMonitor.lock());
 
     // r includes empty workspaces; m skips over them
     const bool    skipEmpty    = **PSKIP;
@@ -761,6 +789,7 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
 
         pMonitor->m_activeWorkspace = startedOn;
     }
+    } // end !m_allMonitors enumeration
 
     Render::GL::g_pHyprOpenGL->makeEGLCurrent();
 
@@ -817,10 +846,20 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
             currentid = i;
 
         if (PWORKSPACE) {
-            image.pWorkspace        = PWORKSPACE;
+            // In all_monitors mode every cell may hold a FOREIGN workspace; do not persist a strong
+            // ref (it would pin foreign workspaces alive for the overview's lifetime and render stale
+            // objects after a foreign-side destroy/recreate). redrawID re-resolves by ID each frame.
+            if (!m_allMonitors)
+                image.pWorkspace = PWORKSPACE;
             const auto previousWS    = activateWorkspaceForPreview(PMONITOR, PWORKSPACE);
             const auto previewStates = applyExclusiveWorkspacePreviewState(PWORKSPACE);
-            const auto windowState   = PWORKSPACE == startedOn ? std::vector<SWindowPreviewState>{} : applyWorkspaceWindowGoalState(PWORKSPACE);
+            // Tighten the startedOn goal-restore exemption to LOCAL workspaces only. startedOn is
+            // always local today, but this guards a future edit from skipping the relayout-undo for a
+            // foreign workspace (which would corrupt its home layout — teardown's
+            // normalizeMonitorWorkspaceRenderState skips m_monitor != MON, so per-cell restore is the
+            // only thing that fixes foreign workspaces). The m_monitor clause is gated behind
+            // m_allMonitors so the flag-OFF path stays byte-identical to stock (PWORKSPACE == startedOn).
+            const auto windowState   = (PWORKSPACE == startedOn && (!m_allMonitors || PWORKSPACE->m_monitor == PMONITOR)) ? std::vector<SWindowPreviewState>{} : applyWorkspaceWindowGoalState(PWORKSPACE);
 
             if (PWORKSPACE == startedOn)
                 PMONITOR->m_activeSpecialWorkspace = openSpecial;
@@ -926,6 +965,19 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
 
         info.cancelled = true;
 
+        if (m_allMonitors) {
+            // View-only mode: no window dragging. Swallow the press; on release capture the click
+            // intent (right button OR Shift => pull onto current monitor; plain left => focus owner).
+            if (event.state == WL_POINTER_BUTTON_STATE_PRESSED)
+                return;
+
+            const bool rightButton = event.button == BTN_RIGHT;
+            m_pullToCurrent        = Hyprexpo::resolveClickIntent(rightButton, shiftModifierHeld()) == Hyprexpo::EClickIntent::PullToCurrent;
+            selectHoveredWorkspace();
+            close();
+            return;
+        }
+
         if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
             beginWindowDrag();
             return;
@@ -952,6 +1004,36 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
     mouseButtonHook = Event::bus()->m_events.input.mouse.button.listen([onCursorSelect](const IPointer::SButtonEvent& event, Event::SCallbackInfo& info) { onCursorSelect(event, info); });
     touchDownHook = Event::bus()->m_events.input.touch.down.listen([onTouchSelect](const ITouch::SDownEvent&, Event::SCallbackInfo& info) { onTouchSelect(info); });
     workspaceMoveHook = Event::bus()->m_events.window.moveToWorkspace.listen([this](PHLWINDOW window, PHLWORKSPACE workspace) { onWindowMoveToWorkspace(window, workspace); });
+
+    if (m_allMonitors) {
+        // CRITICAL lifecycle guard: a monitor add/remove while the consolidated grid is open
+        // invalidates cell ownership — Hyprland reassigns workspace->m_monitor to a survivor, so a
+        // cached cell could render a migrated workspace and a path-(a) click could focus the wrong
+        // survivor. Closing (without selection) is the cheapest safe response: the teardown animation
+        // runs on our own monitor and no foreign focus/switch is attempted. close()/redrawID re-resolve
+        // every cell by ID, and the unplug of our OWN monitor is handled by close()'s !MON branch.
+        auto onMonitorLayoutChange = [this](PHLMONITOR mon) {
+            if (closing)
+                return;
+            // If our OWN monitor is the one going away (or is already gone), tearing down
+            // synchronously here would run close()->g_pOverview.reset() inside the monitor signal
+            // emit — destroying this COverview and its still-dispatching listener (use-after-free).
+            // Defer that teardown to the next event-loop tick; re-check the global since the overview
+            // may have been reset by then.
+            if (!mon || mon == pMonitor.lock()) {
+                g_pEventLoopManager->doLater([]() {
+                    if (g_pOverview)
+                        g_pOverview->close(false);
+                });
+                return;
+            }
+            // Foreign monitor hotplug: close() keeps our own (still-valid) monitor and tears down via
+            // the async animation end-callback, so a synchronous close here does not reset inline.
+            close(false);
+        };
+        monitorAddedHook   = Event::bus()->m_events.monitor.added.listen([onMonitorLayoutChange](PHLMONITOR mon) { onMonitorLayoutChange(mon); });
+        monitorRemovedHook = Event::bus()->m_events.monitor.removed.listen([onMonitorLayoutChange](PHLMONITOR mon) { onMonitorLayoutChange(mon); });
+    }
 
     enterSubmapIfEnabled();
 }

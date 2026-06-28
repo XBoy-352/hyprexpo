@@ -70,8 +70,14 @@ void COverview::redrawID(int id, bool forcelowres) {
 
     clearWithColor(CHyprColor{0, 0, 0, 1.0});
 
-    const auto PWORKSPACE = image.pWorkspace ? image.pWorkspace : g_pCompositor->getWorkspaceByID(image.workspaceID);
-    image.pWorkspace      = PWORKSPACE;
+    // In all_monitors mode always re-resolve foreign cells by ID and never persist the strong ref:
+    // a foreign workspace destroyed/recreated on its home monitor (same ID) must not keep rendering a
+    // stale object, and we must not pin foreign workspaces alive for the overview's lifetime. Emptied
+    // workspaces fall to the null/WORKSPACE_INVALID path below.
+    const auto PWORKSPACE = m_allMonitors ? g_pCompositor->getWorkspaceByID(image.workspaceID)
+                                          : (image.pWorkspace ? image.pWorkspace : g_pCompositor->getWorkspaceByID(image.workspaceID));
+    if (!m_allMonitors)
+        image.pWorkspace = PWORKSPACE;
 
     const auto   restoreWorkspace = MON->m_activeWorkspace;
     PHLWORKSPACE openSpecial      = MON->m_activeSpecialWorkspace;
@@ -83,7 +89,11 @@ void COverview::redrawID(int id, bool forcelowres) {
     if (PWORKSPACE) {
         const auto previousWS    = activateWorkspaceForPreview(MON, PWORKSPACE);
         const auto previewStates = applyExclusiveWorkspacePreviewState(PWORKSPACE);
-        const auto windowState   = PWORKSPACE == startedOn ? std::vector<SWindowPreviewState>{} : applyWorkspaceWindowGoalState(PWORKSPACE);
+        // Local-only goal-restore exemption (see normalizeMonitorWorkspaceRenderState note): never skip
+        // the relayout-undo for a foreign workspace, or its home layout corrupts. The added m_monitor
+        // clause is gated behind m_allMonitors so the flag-OFF path stays byte-identical to stock
+        // (PWORKSPACE == startedOn), which is the only behaviour that can hold without the feature.
+        const auto windowState   = (PWORKSPACE == startedOn && (!m_allMonitors || PWORKSPACE->m_monitor == MON)) ? std::vector<SWindowPreviewState>{} : applyWorkspaceWindowGoalState(PWORKSPACE);
 
         if (PWORKSPACE == startedOn)
             MON->m_activeSpecialWorkspace = openSpecial;
@@ -208,25 +218,86 @@ void COverview::close(bool switchToSelection) {
     redrawAll();
 
     if (switchToSelection && TILE.workspaceID != MON->activeWorkspaceID()) {
-        MON->setSpecialWorkspace(0);
+        bool handled = false;
 
-        // If this tile's workspace was WORKSPACE_INVALID, move to the next
-        // empty workspace. This should only happen if skip_empty is on, in
-        // which case some tiles will be left with this ID intentionally.
-        const int  NEWID = TILE.workspaceID == WORKSPACE_INVALID ? getWorkspaceIDNameFromString("emptynm").id : TILE.workspaceID;
+        if (m_allMonitors) {
+            // Re-resolve by ID; never trust a cached home monitor across frames.
+            const auto WS   = g_pCompositor->getWorkspaceByID(TILE.workspaceID);
+            const auto HOME = WS ? WS->m_monitor.lock() : nullptr;
 
-        const auto NEWIDWS = g_pCompositor->getWorkspaceByID(NEWID);
+            // TOCTOU re-validation: an unplug between open and click can reassign WS->m_monitor to a
+            // survivor. Confirm HOME is still the owner AND present in the live monitor list before we
+            // focus it; otherwise fall through to the local-switch fallback.
+            bool homeValid = false;
+            if (HOME) {
+                const bool stillOwner = HOME == WS->m_monitor.lock();
+                const bool live       = std::find(g_pCompositor->m_monitors.begin(), g_pCompositor->m_monitors.end(), HOME) != g_pCompositor->m_monitors.end();
+                homeValid             = stillOwner && live;
+            }
 
-        const auto OLDWS = MON->m_activeWorkspace;
+            if (m_pullToCurrent && WS) {
+                // path (b): PULL the workspace onto the current monitor and switch to it here.
+                MON->setSpecialWorkspace(0);
+                const auto OLDWS = MON->m_activeWorkspace;
+                g_pCompositor->moveWorkspaceToMonitor(WS, MON, false);
+                const auto CHANGE = Config::Actions::changeWorkspaceOnCurrentMonitor(WS);
+                if (!CHANGE)
+                    Log::logger->log(Log::ERR, "[hyprexpo] failed to pull workspace: {}", CHANGE.error().message);
 
-        const auto CHANGE = !NEWIDWS ? Config::Actions::changeWorkspace(std::to_string(NEWID)) : Config::Actions::changeWorkspace(NEWIDWS->getConfigName());
-        if (!CHANGE)
-            Log::logger->log(Log::ERR, "[hyprexpo] failed to change workspace: {}", CHANGE.error().message);
+                // MON's IN/OUT (animation targets MON — correct for path b).
+                g_pDesktopAnimationManager->startAnimation(MON->m_activeWorkspace, CDesktopAnimationManager::ANIMATION_TYPE_IN, true, true);
+                g_pDesktopAnimationManager->startAnimation(OLDWS, CDesktopAnimationManager::ANIMATION_TYPE_OUT, false, true);
 
-        g_pDesktopAnimationManager->startAnimation(MON->m_activeWorkspace, CDesktopAnimationManager::ANIMATION_TYPE_IN, true, true);
-        g_pDesktopAnimationManager->startAnimation(OLDWS, CDesktopAnimationManager::ANIMATION_TYPE_OUT, false, true);
+                startedOn = MON->m_activeWorkspace;
+                handled   = true;
+            } else if (WS && homeValid && HOME != MON) {
+                // path (a): FOCUS the owner monitor and switch there. MON stays on startedOn so the
+                // overview tears down cleanly via the unconditional end-callback below
+                // (shouldRenderOverviewForMonitor keeps rendering while MON->m_activeWorkspace == startedOn).
+                const auto HOMEOLDWS = HOME->m_activeWorkspace;
+                const auto FOCUS     = Config::Actions::focusMonitor(HOME);
+                if (!FOCUS)
+                    Log::logger->log(Log::ERR, "[hyprexpo] failed to focus owner monitor: {}", FOCUS.error().message);
 
-        startedOn = MON->m_activeWorkspace;
+                // If the clicked workspace is already HOME's active one, focusMonitor alone lands us
+                // there — re-switching (and animating an already-active workspace) is redundant/wrong.
+                if (HOMEOLDWS != WS) {
+                    HOME->setSpecialWorkspace(0);
+                    const auto CHANGE = Config::Actions::changeWorkspace(WS->getConfigName());
+                    if (!CHANGE)
+                        Log::logger->log(Log::ERR, "[hyprexpo] failed to change workspace: {}", CHANGE.error().message);
+
+                    // Animate HOME's old/new workspaces, NOT MON's.
+                    g_pDesktopAnimationManager->startAnimation(WS, CDesktopAnimationManager::ANIMATION_TYPE_IN, true, true);
+                    if (HOMEOLDWS)
+                        g_pDesktopAnimationManager->startAnimation(HOMEOLDWS, CDesktopAnimationManager::ANIMATION_TYPE_OUT, false, true);
+                }
+
+                handled = true;
+            }
+        }
+
+        if (!handled) {
+            MON->setSpecialWorkspace(0);
+
+            // If this tile's workspace was WORKSPACE_INVALID, move to the next
+            // empty workspace. This should only happen if skip_empty is on, in
+            // which case some tiles will be left with this ID intentionally.
+            const int  NEWID = TILE.workspaceID == WORKSPACE_INVALID ? getWorkspaceIDNameFromString("emptynm").id : TILE.workspaceID;
+
+            const auto NEWIDWS = g_pCompositor->getWorkspaceByID(NEWID);
+
+            const auto OLDWS = MON->m_activeWorkspace;
+
+            const auto CHANGE = !NEWIDWS ? Config::Actions::changeWorkspace(std::to_string(NEWID)) : Config::Actions::changeWorkspace(NEWIDWS->getConfigName());
+            if (!CHANGE)
+                Log::logger->log(Log::ERR, "[hyprexpo] failed to change workspace: {}", CHANGE.error().message);
+
+            g_pDesktopAnimationManager->startAnimation(MON->m_activeWorkspace, CDesktopAnimationManager::ANIMATION_TYPE_IN, true, true);
+            g_pDesktopAnimationManager->startAnimation(OLDWS, CDesktopAnimationManager::ANIMATION_TYPE_OUT, false, true);
+
+            startedOn = MON->m_activeWorkspace;
+        }
     }
 
     size->setCallbackOnEnd(removeOverview);

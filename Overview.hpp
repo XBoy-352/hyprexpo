@@ -148,6 +148,15 @@ class COverview {
     CHyprSignalListener          touchMoveHook;
     CHyprSignalListener          touchDownHook;
     CHyprSignalListener          workspaceMoveHook;
+    CHyprSignalListener          monitorAddedHook;
+    CHyprSignalListener          monitorRemovedHook;
+
+    // all_monitors (consolidated all-workspaces overview): when true, cells enumerate global
+    // workspace IDs 1..N regardless of which physical monitor owns each. View-only.
+    bool                         m_allMonitors   = false;
+    // Click intent captured in onCursorSelect, consumed by close(): true => pull onto current
+    // monitor (path b), false => focus the owner monitor and switch there (path a).
+    bool                         m_pullToCurrent = false;
 
     bool                         swipe             = false;
     bool                         swipeWasCommenced = false;
