@@ -10,12 +10,15 @@
 #include <hyprland/src/config/shared/actions/ConfigActions.hpp>
 #include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
 #include <hyprland/src/managers/animation/DesktopAnimationManager.hpp>
+#include <hyprland/src/layout/LayoutManager.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
 #undef private
 #undef protected
+#include <hyprland/src/debug/log/Logger.hpp>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -31,6 +34,9 @@ void COverview::redrawID(int id, bool forcelowres) {
     }
 
     blockOverviewRendering = true;
+
+    // [hyprexpo-perf] instrumentation — remove after tuning
+    const auto _perfT0 = std::chrono::steady_clock::now();
 
     Render::GL::g_pHyprOpenGL->makeEGLCurrent();
     settleWorkspaceMoveAnimations();
@@ -87,6 +93,30 @@ void COverview::redrawID(int id, bool forcelowres) {
     startedOn->m_visible = false;
 
     if (PWORKSPACE) {
+        // all_monitors: a FOREIGN workspace's windows are laid out in their home monitor's coordinate
+        // space, so the layout/renderer leave them outside this monitor's frame and the cell renders
+        // empty. Temporarily reparent the workspace AND its windows onto MON so recalculateMonitor lays
+        // them out in-frame for the capture. Everything (workspace owner, each window's owner + animated
+        // position/size, home-monitor layout) is fully restored after the capture below.
+        struct SForeignSave {
+            PHLWINDOW     w;
+            PHLMONITORREF mon;
+            Vector2D      posV, posG, sizeV, sizeG;
+        };
+        std::vector<SForeignSave> foreignSaved;
+        PHLMONITORREF             foreignHome;
+        const bool                reparentForeign = m_allMonitors && PWORKSPACE->m_monitor && PWORKSPACE->m_monitor.lock() != MON;
+        if (reparentForeign) {
+            foreignHome = PWORKSPACE->m_monitor;
+            for (const auto& w : g_pCompositor->m_windows) {
+                if (!windowVisibleOnWorkspace(w, PWORKSPACE))
+                    continue;
+                foreignSaved.push_back({w, w->m_monitor, w->m_realPosition->value(), w->m_realPosition->goal(), w->m_realSize->value(), w->m_realSize->goal()});
+                w->m_monitor = MON;
+            }
+            PWORKSPACE->m_monitor = MON;
+        }
+
         const auto previousWS    = activateWorkspaceForPreview(MON, PWORKSPACE);
         const auto previewStates = applyExclusiveWorkspacePreviewState(PWORKSPACE);
         // Local-only goal-restore exemption (see normalizeMonitorWorkspaceRenderState note): never skip
@@ -106,6 +136,28 @@ void COverview::redrawID(int id, bool forcelowres) {
         restoreWorkspaceWindowGoalState(windowState);
         restoreWorkspacePreviewStates(previewStates);
         restoreActiveWorkspaceAfterPreview(MON, previousWS);
+
+        if (reparentForeign) {
+            // Restore foreign workspace ownership, each window's owner + animated pos/size, then re-lay
+            // the home monitor so its real layout is untouched by the capture (runs last → wins).
+            PWORKSPACE->m_monitor = foreignHome;
+            for (const auto& s : foreignSaved) {
+                if (!s.w)
+                    continue;
+                s.w->m_monitor = s.mon;
+                s.w->m_realPosition->setValueAndWarp(s.posV);
+                *s.w->m_realPosition = s.posG;
+                s.w->m_realSize->setValueAndWarp(s.sizeV);
+                *s.w->m_realSize = s.sizeG;
+            }
+            if (g_layoutManager && foreignHome) {
+                const auto _perfR0 = std::chrono::steady_clock::now();
+                g_layoutManager->recalculateMonitor(foreignHome.lock());
+                const auto _perfR1 = std::chrono::steady_clock::now();
+                Log::logger->log(Log::DEBUG, "[hyprexpo-perf] cell {} foreignRecalc {}us", id,
+                                 (long long)std::chrono::duration_cast<std::chrono::microseconds>(_perfR1 - _perfR0).count());
+            }
+        }
 
         if (PWORKSPACE == startedOn)
             MON->m_activeSpecialWorkspace.reset();
@@ -135,6 +187,11 @@ void COverview::redrawID(int id, bool forcelowres) {
         if (activeWorkspace == startedOn)
             g_pDesktopAnimationManager->startAnimation(activeWorkspace, CDesktopAnimationManager::ANIMATION_TYPE_IN, true, true);
     }
+
+    // [hyprexpo-perf] instrumentation — remove after tuning
+    const auto _perfT1 = std::chrono::steady_clock::now();
+    Log::logger->log(Log::DEBUG, "[hyprexpo-perf] redrawID {} total {}us", id,
+                     (long long)std::chrono::duration_cast<std::chrono::microseconds>(_perfT1 - _perfT0).count());
 
     blockOverviewRendering = false;
 }
