@@ -161,6 +161,7 @@ int main() {
     expect(clampGridColumns(3) == 3, "columns keep valid value");
     expect(clampGridColumns(99) == 7, "columns clamp upper bound");
     expect(HyprexpoConfig::SHOW_PINNED_WINDOWS_DEFAULT == 0, "pinned windows are hidden from previews by default");
+    expect(HyprexpoConfig::DRAG_DROP_ENABLE_DEFAULT == 1, "drag and drop is enabled by default");
 
     const auto boundedGapFill = expandDynamicWorkspaceIDs({2, 4}, true, 64);
     expect(boundedGapFill.has_value(), "bounded fill_gaps range is accepted");
