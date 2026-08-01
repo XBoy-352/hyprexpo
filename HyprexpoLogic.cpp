@@ -158,6 +158,25 @@ int tileIndexFromPoint(double x, double y, double width, double height, int side
     return hx + hy * safeSide;
 }
 
+int numberKeyToVisibleIndex(int number) {
+    if (number == 0)
+        return 9;
+    if (number < 1 || number > 9)
+        return -1;
+
+    return number - 1;
+}
+
+ENumberKeyMode numberKeyModeFromString(const std::string& mode) {
+    const auto normalized = lowerString(trimString(mode));
+    if (normalized == "index")
+        return ENumberKeyMode::Index;
+    if (normalized == "passthrough")
+        return ENumberKeyMode::Passthrough;
+
+    return ENumberKeyMode::Workspace;
+}
+
 SDropIntentGeometry computeDropIntentGeometry(const SDropIntentInput& input) {
     SDropIntentGeometry geometry;
 
