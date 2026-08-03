@@ -158,6 +158,25 @@ int tileIndexFromPoint(double x, double y, double width, double height, int side
     return hx + hy * safeSide;
 }
 
+int numberKeyToVisibleIndex(int number) {
+    if (number == 0)
+        return 9;
+    if (number < 1 || number > 9)
+        return -1;
+
+    return number - 1;
+}
+
+ENumberKeyMode numberKeyModeFromString(const std::string& mode) {
+    const auto normalized = lowerString(trimString(mode));
+    if (normalized == "index")
+        return ENumberKeyMode::Index;
+    if (normalized == "passthrough")
+        return ENumberKeyMode::Passthrough;
+
+    return ENumberKeyMode::Workspace;
+}
+
 SDropIntentGeometry computeDropIntentGeometry(const SDropIntentInput& input) {
     SDropIntentGeometry geometry;
 
@@ -176,16 +195,51 @@ SDropIntentGeometry computeDropIntentGeometry(const SDropIntentInput& input) {
     const double pointX  = input.targetTileLocal.x + ratioX * input.targetTileLocal.w;
     const double pointY  = input.targetTileLocal.y + ratioY * input.targetTileLocal.h;
 
+    // proxyW/proxyH are clamped to at most the tile size above, so `tile.x + tile.w - proxyW` is
+    // algebraically >= tile.x. In floating point it is not: when the dragged window is at least as
+    // large as the tile the proxy clamps to exactly tile.w/tile.h, and the subtraction can land an
+    // ULP below tile.x. Passing that as clamp()'s upper bound is UB, and libstdc++ builds with
+    // assertions enabled turn it into an abort() that takes the whole compositor down mid-render.
+    const double maxProxyX = std::max(input.targetTileLocal.x, input.targetTileLocal.x + input.targetTileLocal.w - proxyW);
+    const double maxProxyY = std::max(input.targetTileLocal.y, input.targetTileLocal.y + input.targetTileLocal.h - proxyH);
+
     geometry.valid                = true;
     geometry.targetWorkspacePoint = {ratioX * input.workspaceSize.w, ratioY * input.workspaceSize.h};
     geometry.targetProxyLocal     = {
-        std::clamp(pointX - input.grabOffset.x * scaleX, input.targetTileLocal.x, input.targetTileLocal.x + input.targetTileLocal.w - proxyW),
-        std::clamp(pointY - input.grabOffset.y * scaleY, input.targetTileLocal.y, input.targetTileLocal.y + input.targetTileLocal.h - proxyH),
+        std::clamp(pointX - input.grabOffset.x * scaleX, input.targetTileLocal.x, maxProxyX),
+        std::clamp(pointY - input.grabOffset.y * scaleY, input.targetTileLocal.y, maxProxyY),
         proxyW,
         proxyH,
     };
 
     return geometry;
+}
+
+SGestureSyncDecision evaluateGestureSync(const SGestureConfig& config) {
+    if (config.fingers == 0)
+        return {};
+
+    if (config.fingers < 2 || config.fingers > 9)
+        return {.error = "gesture_fingers must be 0 (disabled) or 2-9, got " + std::to_string(config.fingers)};
+
+    if (!config.directionValid)
+        return {.error = "gesture_direction '" + config.direction + "' is not a valid trackpad direction"};
+
+    return {.registerGesture = true, .error = ""};
+}
+
+// Hyprland 0.56 exposes plugin strings as const char*.
+std::string decodeConfigString(const void* dataptr, bool underlyingIsStdString, const std::string& fallback) {
+    if (!dataptr)
+        return fallback;
+
+    if (underlyingIsStdString) {
+        auto* const* ptr = reinterpret_cast<std::string* const*>(dataptr);
+        return ptr && *ptr ? **ptr : fallback;
+    }
+
+    auto* const* ptr = reinterpret_cast<const char* const*>(dataptr);
+    return ptr && *ptr ? std::string{*ptr} : fallback;
 }
 
 std::string fallbackTokenForVisibleIndex(int visibleIndex) {

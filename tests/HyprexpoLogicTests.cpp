@@ -161,6 +161,12 @@ int main() {
     expect(clampGridColumns(3) == 3, "columns keep valid value");
     expect(clampGridColumns(99) == 7, "columns clamp upper bound");
     expect(HyprexpoConfig::SHOW_PINNED_WINDOWS_DEFAULT == 0, "pinned windows are hidden from previews by default");
+    expect(std::string{HyprexpoConfig::NUMBER_KEY_MODE_DEFAULT} == "workspace", "raw number keys keep selecting workspace IDs by default");
+    expect(numberKeyModeFromString("workspace") == ENumberKeyMode::Workspace, "workspace number-key mode parses");
+    expect(numberKeyModeFromString(" INDEX ") == ENumberKeyMode::Index, "index number-key mode is case-insensitive and trimmed");
+    expect(numberKeyModeFromString("passthrough") == ENumberKeyMode::Passthrough, "passthrough number-key mode parses");
+    expect(numberKeyModeFromString("invalid") == ENumberKeyMode::Workspace, "invalid number-key mode safely preserves the default");
+    expect(HyprexpoConfig::DRAG_DROP_ENABLE_DEFAULT == 1, "drag and drop is enabled by default");
 
     const auto boundedGapFill = expandDynamicWorkspaceIDs({2, 4}, true, 64);
     expect(boundedGapFill.has_value(), "bounded fill_gaps range is accepted");
@@ -187,6 +193,11 @@ int main() {
     expect(tileIndexFromPoint(299, 299, 300, 300, 3) == 8, "legacy tile index bottom-right inside");
     expect(tileIndexFromPoint(300, 300, 300, 300, 3) == 8, "legacy tile index clamps monitor edge");
     expect(tileIndexFromPoint(10, 10, 0, 300, 3) == -1, "legacy tile index rejects invalid width");
+    expect(numberKeyToVisibleIndex(1) == 0, "number key 1 selects the first visible tile");
+    expect(numberKeyToVisibleIndex(2) == 1, "number key 2 selects the second visible tile");
+    expect(numberKeyToVisibleIndex(9) == 8, "number key 9 selects the ninth visible tile");
+    expect(numberKeyToVisibleIndex(0) == 9, "number key 0 selects the tenth visible tile");
+    expect(numberKeyToVisibleIndex(10) == -1, "out-of-range number is not a visible tile index");
 
     SDropIntentInput dropInput{
         .targetValid     = true,
@@ -212,11 +223,64 @@ int main() {
     expect(near(drop.targetWorkspacePoint.x, 0) && near(drop.targetWorkspacePoint.y, 0), "drop intent clamps outside pointer to workspace edge");
     expect(near(drop.targetProxyLocal.x, 0) && near(drop.targetProxyLocal.y, 0), "drop intent clamps outside pointer proxy to tile edge");
 
+    // Regression: a window at least as large as the target tile makes proxyW/proxyH clamp to
+    // exactly tile.w/tile.h, so `tile.x + tile.w - proxyW` -- algebraically just tile.x -- is
+    // catastrophic cancellation and can round an ULP below tile.x. Feeding that to clamp() as the
+    // upper bound is UB and aborts under libstdc++ assertions, killing the compositor mid-render.
+    //
+    // 0.1 and 1200.5 are chosen because (0.1 + 1200.5) - 1200.5 < 0.1 in IEEE-754. Whether the
+    // cancellation rounds down at all depends on the magnitude of the tile origin, which is why
+    // dropping onto a tile in one grid row could crash while an adjacent tile was fine. Without
+    // the fix this call does not return -- it aborts the test binary.
+    SDropIntentInput tileFillingDropInput{
+        .targetValid     = true,
+        .pointerLocal    = {600, 600},
+        .targetTileLocal = {0.1, 0.1, 1200.5, 1200.5},
+        .workspaceSize   = {1200, 1200},
+        .windowSize      = {2400, 2400}, // larger than the workspace, so the proxy fills the tile
+        .grabOffset      = {0, 0},
+    };
+    const auto tileFillingDrop = computeDropIntentGeometry(tileFillingDropInput);
+    expect(tileFillingDrop.valid, "drop intent stays valid when the window fills the tile");
+    expect(near(tileFillingDrop.targetProxyLocal.w, tileFillingDropInput.targetTileLocal.w) && near(tileFillingDrop.targetProxyLocal.h, tileFillingDropInput.targetTileLocal.h),
+           "a tile-filling proxy is capped to the tile size");
+    expect(tileFillingDrop.targetProxyLocal.x >= tileFillingDropInput.targetTileLocal.x && tileFillingDrop.targetProxyLocal.y >= tileFillingDropInput.targetTileLocal.y,
+           "a tile-filling proxy never starts outside the tile");
+
     dropInput.targetValid = false;
     expect(!computeDropIntentGeometry(dropInput).valid, "drop intent rejects invalid target");
     dropInput.targetValid   = true;
     dropInput.windowSize.w = 0;
     expect(!computeDropIntentGeometry(dropInput).valid, "drop intent rejects invalid window size");
+
+    const char*       rawConfigString = "vertical";
+    const void*       rawReply        = &rawConfigString;
+    expect(decodeConfigString(rawReply, false, "up") == "vertical", "a const char* config reply is decoded, not treated as a type mismatch");
+
+    std::string       stdConfigString = "horizontal";
+    std::string*      stdConfigPtr    = &stdConfigString;
+    expect(decodeConfigString(&stdConfigPtr, true, "up") == "horizontal", "a std::string config reply is still decoded");
+
+    const char*       nullConfigString = nullptr;
+    expect(decodeConfigString(&nullConfigString, false, "up") == "up", "a null inner pointer falls back to the default");
+    expect(decodeConfigString(nullptr, false, "up") == "up", "an absent config value falls back to the default");
+
+    const auto gestureDisabled = evaluateGestureSync({.fingers = 0, .direction = "up", .directionValid = true});
+    expect(!gestureDisabled.registerGesture, "gesture_fingers = 0 registers nothing");
+    expect(gestureDisabled.error.empty(), "gesture_fingers = 0 is opt-out, not a misconfiguration");
+
+    const auto gestureEnabled = evaluateGestureSync({.fingers = 3, .direction = "vertical", .directionValid = true});
+    expect(gestureEnabled.registerGesture && gestureEnabled.error.empty(), "a valid finger count and direction registers the gesture");
+
+    for (const int fingers : {-1, 1, 10}) {
+        const auto rejected = evaluateGestureSync({.fingers = fingers, .direction = "up", .directionValid = true});
+        expect(!rejected.registerGesture, "gesture_fingers " + std::to_string(fingers) + " registers nothing");
+        expect(rejected.error.find(std::to_string(fingers)) != std::string::npos, "gesture_fingers " + std::to_string(fingers) + " is reported with the offending value");
+    }
+
+    const auto badDirection = evaluateGestureSync({.fingers = 3, .direction = "sideways", .directionValid = false});
+    expect(!badDirection.registerGesture, "an unknown gesture_direction registers nothing");
+    expect(badDirection.error.find("sideways") != std::string::npos, "an unknown gesture_direction is reported with the offending value");
 
     expect(fallbackTokenForVisibleIndex(0) == "1", "fallback token first workspace");
     expect(fallbackTokenForVisibleIndex(9) == "0", "fallback token tenth workspace");

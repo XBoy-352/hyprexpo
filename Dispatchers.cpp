@@ -4,12 +4,16 @@
 
 #include "ExpoGesture.hpp"
 #include "HyprexpoConfig.hpp"
+#include "HyprexpoLogic.hpp"
+#include "HyprlandConfigCompat.hpp"
 #include "Overview.hpp"
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/shared/actions/ConfigActions.hpp>
+#include <hyprland/src/debug/log/Logger.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/state/GlobalWindowController.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/helpers/Color.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/managers/KeybindManager.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
@@ -28,8 +32,9 @@
 #include <string>
 #include <string_view>
 
-static bool g_unloading         = false;
-static bool renderingOverview   = false;
+static bool g_unloading                   = false;
+static bool g_gestureRegistrationDisabled = false;
+static bool renderingOverview             = false;
 static SP<Config::Values::CStringValue> g_pCancelKeyConfig;
 
 static SDispatchResult onExpoDispatcher(std::string arg);
@@ -198,6 +203,8 @@ static SDispatchResult changeToSingleDigitWorkspace(const std::string& arg) {
 
 static std::string workspaceArgForKeysym(xkb_keysym_t keysym) {
     switch (keysym) {
+        case XKB_KEY_0:
+        case XKB_KEY_KP_0: return "0";
         case XKB_KEY_1:
         case XKB_KEY_KP_1: return "1";
         case XKB_KEY_2:
@@ -248,6 +255,24 @@ bool shouldSelectWorkspaceFromKey(const IKeyboard::SKeyEvent& event) {
 
     const auto arg = workspaceArgForKeyEvent(event);
     if (arg.empty())
+        return false;
+
+    static auto const* PNUMBERKEYMODE = (Hyprlang::STRING const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:number_key_mode")->getDataStaticPtr();
+    const auto         mode           = Hyprexpo::numberKeyModeFromString(std::string{*PNUMBERKEYMODE});
+
+    if (mode == Hyprexpo::ENumberKeyMode::Passthrough)
+        return false;
+
+    if (mode == Hyprexpo::ENumberKeyMode::Index) {
+        const int visibleIndex = Hyprexpo::numberKeyToVisibleIndex(arg[0] - '0');
+        if (visibleIndex >= 0)
+            g_pOverview->onKbSelectToken(visibleIndex);
+        return true;
+    }
+
+    // Zero was not handled by the legacy raw-key path. Preserve that behavior
+    // in workspace mode while still allowing zero to select tile 10 in index mode.
+    if (arg == "0")
         return false;
 
     return changeToSingleDigitWorkspace(arg).success;
@@ -473,7 +498,8 @@ static SDispatchResult onExpoDispatcher(std::string arg) {
 }
 
 static SDispatchResult registerExpoGesture(int fingerCount, const std::string& directionName, const std::string& action, const std::string& mods, float deltaScale, bool disableInhibit) {
-    if (g_unloading)
+    // PLUGIN_EXIT reloads Lua config before dlclose, so block every registration path.
+    if (g_unloading || g_gestureRegistrationDisabled)
         return {};
 
     if (fingerCount <= 1 || fingerCount >= 10)
@@ -501,6 +527,40 @@ static SDispatchResult registerExpoGesture(int fingerCount, const std::string& d
         return {.success = false, .error = result.error()};
 
     return {};
+}
+
+void disableExpoGestureRegistration() {
+    g_gestureRegistrationDisabled = true;
+}
+
+static void reportGestureConfigError(const std::string& error) {
+    Log::logger->log(Log::ERR, "[hyprexpo] {}", error);
+    HyprlandAPI::addNotification(PHANDLE, "[hyprexpo] " + error, CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
+}
+
+void syncExpoGestureFromConfig() {
+    if (g_unloading || g_gestureRegistrationDisabled)
+        return;
+
+    const int         FINGERS = (int)CompatHyprlandAPI::intValue("plugin:hyprexpo:gesture_fingers");
+    const std::string DIR     = CompatHyprlandAPI::stringValue("plugin:hyprexpo:gesture_direction");
+
+    const auto DECISION = Hyprexpo::evaluateGestureSync({
+        .fingers        = FINGERS,
+        .direction      = DIR,
+        .directionValid = g_pTrackpadGestures && g_pTrackpadGestures->dirForString(DIR) != TRACKPAD_GESTURE_DIR_NONE,
+    });
+
+    if (!DECISION.error.empty()) {
+        reportGestureConfigError(DECISION.error);
+        return;
+    }
+
+    if (!DECISION.registerGesture)
+        return;
+
+    if (const auto RESULT = registerExpoGesture(FINGERS, DIR, "expo", "", 1.F, false); !RESULT.success)
+        reportGestureConfigError(RESULT.error);
 }
 
 static SDispatchResult onKbFocusDispatcher(std::string arg) {

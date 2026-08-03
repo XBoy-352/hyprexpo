@@ -137,6 +137,7 @@ plugin {
         cancel_key = escape
         show_cursor = 1
         show_pinned_windows = 0
+        drag_drop_enable = 0 # Disable moving windows by dragging workspace previews.
     }
 }
 ```
@@ -155,10 +156,13 @@ hl.config({
             gesture_distance = 200,
             cancel_key = "escape",
             show_cursor = 1,
+            drag_drop_enable = 0, -- Disable moving windows by dragging workspace previews.
         },
     },
 })
 ```
+
+`drag_drop_enable` defaults to `1`. Set it to `0` to keep workspace clicks from moving windows when the pointer shifts during a click.
 
 Add a dispatcher binding:
 
@@ -180,12 +184,23 @@ Optional keyboard navigation:
 plugin {
     hyprexpo {
         keynav_enable = 1
+        number_key_mode = passthrough
         keynav_wrap_h = 1
         keynav_wrap_v = 1
         keynav_reading_order = 0
     }
 }
+```
 
+`number_key_mode` controls the plugin's automatic raw digit handling:
+
+- `workspace` (default) keeps selecting global workspace IDs.
+- `index` selects positions in the active overview; for example, `2` selects
+  its second visible tile even when that tile is workspace 11.
+- `passthrough` leaves digits to user-defined mappings such as the `kb_selecti`
+  bindings below.
+
+```ini
 submap = hyprexpo
     bind = , left,   hyprexpo:kb_focus, left
     bind = , right,  hyprexpo:kb_focus, right

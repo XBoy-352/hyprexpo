@@ -14,9 +14,6 @@
 #include <stdexcept>
 #include <string>
 
-// Plugin version, baked in at build time from the VERSION file (see
-// scripts/version.sh). The fallback only applies to ad-hoc builds that bypass
-// the build system; real builds always define this.
 #ifndef HYPREXPO_VERSION
 #define HYPREXPO_VERSION "v0.0.0-dev"
 #endif
@@ -126,19 +123,25 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
             info.cancelled = true;
     });
 
+    static auto PCFG = Event::bus()->m_events.config.reloaded.listen([]() { syncExpoGestureFromConfig(); });
+
     registerHyprexpoDispatchers();
 
     registerHyprexpoConfigValues();
 
     HyprlandAPI::reloadConfig();
 
+    syncExpoGestureFromConfig();
+
     return {"hyprexpo", "hyprexpo+ with keyboard selection, labels, and borders", "sandwich", HYPREXPO_VERSION};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
+    disableExpoGestureRegistration();
+
     g_pOverview.reset();
     g_pHyprRenderer->m_renderPass.removeAllOfType("COverviewPassElement");
 
-    Config::mgr()->reload(); // we need to reload now to clear all the gestures
+    Config::mgr()->reload();
     resetDispatcherRuntime();
 }
