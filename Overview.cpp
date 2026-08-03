@@ -64,6 +64,7 @@ static bool isStringConfig(const std::string& name) {
         {"plugin:hyprexpo:label_bg_shape", true},
         {"plugin:hyprexpo:label_font_family", true},
         {"plugin:hyprexpo:cancel_key", true},
+        {"plugin:hyprexpo:gesture_direction", true},
         {"plugin:hyprexpo:border_grad_current", true},
         {"plugin:hyprexpo:border_grad_focus", true},
         {"plugin:hyprexpo:border_grad_hover", true},
@@ -97,6 +98,7 @@ static Config::STRING stringDefault(const std::string& name) {
         {"plugin:hyprexpo:label_bg_shape", HyprexpoConfig::LABEL_BG_SHAPE_DEFAULT},
         {"plugin:hyprexpo:label_font_family", HyprexpoConfig::LABEL_FONT_FAMILY_DEFAULT},
         {"plugin:hyprexpo:cancel_key", HyprexpoConfig::CANCEL_KEY_DEFAULT},
+        {"plugin:hyprexpo:gesture_direction", HyprexpoConfig::GESTURE_DIRECTION_DEFAULT},
         {"plugin:hyprexpo:border_grad_current", HyprexpoConfig::BORDER_GRAD_CURRENT_DEFAULT},
         {"plugin:hyprexpo:border_grad_focus", HyprexpoConfig::BORDER_GRAD_FOCUS_DEFAULT},
         {"plugin:hyprexpo:border_grad_hover", HyprexpoConfig::BORDER_GRAD_HOVER_DEFAULT},
@@ -123,6 +125,7 @@ static Config::INTEGER intDefault(const std::string& name) {
         {"plugin:hyprexpo:gaps_in", HyprexpoConfig::GAPS_IN_DEFAULT},
         {"plugin:hyprexpo:bg_col", HyprexpoConfig::BG_COL_DEFAULT},
         {"plugin:hyprexpo:gesture_distance", HyprexpoConfig::GESTURE_DISTANCE_DEFAULT},
+        {"plugin:hyprexpo:gesture_fingers", HyprexpoConfig::GESTURE_FINGERS_DEFAULT},
         {"plugin:hyprexpo:show_cursor", HyprexpoConfig::SHOW_CURSOR_DEFAULT},
         {"plugin:hyprexpo:show_pinned_windows", HyprexpoConfig::SHOW_PINNED_WINDOWS_DEFAULT},
         {"plugin:hyprexpo:drag_drop_enable", HyprexpoConfig::DRAG_DROP_ENABLE_DEFAULT},
@@ -205,6 +208,20 @@ SConfigValueCompat* getConfigValue(HANDLE, const std::string& name) {
     }
 
     return &compat;
+}
+
+Config::INTEGER intValue(const std::string& name) {
+    const auto VALUE = Config::mgr()->getConfigValue(name);
+    if (!VALUE.dataptr || !VALUE.type || *VALUE.type != typeid(Config::INTEGER))
+        return intDefault(name);
+
+    auto* const* ptr = reinterpret_cast<Config::INTEGER* const*>(VALUE.dataptr);
+    return ptr && *ptr ? **ptr : intDefault(name);
+}
+
+Config::STRING stringValue(const std::string& name) {
+    const auto VALUE = Config::mgr()->getConfigValue(name);
+    return Hyprexpo::decodeConfigString(VALUE.dataptr, VALUE.type && *VALUE.type == typeid(Config::STRING), stringDefault(name));
 }
 }
 

@@ -84,6 +84,17 @@ struct SDropIntentGeometry {
     SRect  targetProxyLocal     = {};
 };
 
+struct SGestureConfig {
+    int         fingers = 0;
+    std::string direction;
+    bool        directionValid = false;
+};
+
+struct SGestureSyncDecision {
+    bool        registerGesture = false;
+    std::string error;
+};
+
 std::string trimString(std::string value);
 std::string lowerString(std::string value);
 std::vector<std::string> splitCommaList(const std::string& value);
@@ -99,6 +110,10 @@ int                      tileIndexFromPoint(double x, double y, double width, do
 int                      numberKeyToVisibleIndex(int number);
 ENumberKeyMode           numberKeyModeFromString(const std::string& mode);
 SDropIntentGeometry      computeDropIntentGeometry(const SDropIntentInput& input);
+
+SGestureSyncDecision     evaluateGestureSync(const SGestureConfig& config);
+
+std::string              decodeConfigString(const void* dataptr, bool underlyingIsStdString, const std::string& fallback);
 
 std::string              fallbackTokenForVisibleIndex(int visibleIndex);
 int                      fallbackTokenToVisibleIndex(const std::string& token);

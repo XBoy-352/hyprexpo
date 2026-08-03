@@ -215,6 +215,33 @@ SDropIntentGeometry computeDropIntentGeometry(const SDropIntentInput& input) {
     return geometry;
 }
 
+SGestureSyncDecision evaluateGestureSync(const SGestureConfig& config) {
+    if (config.fingers == 0)
+        return {};
+
+    if (config.fingers < 2 || config.fingers > 9)
+        return {.error = "gesture_fingers must be 0 (disabled) or 2-9, got " + std::to_string(config.fingers)};
+
+    if (!config.directionValid)
+        return {.error = "gesture_direction '" + config.direction + "' is not a valid trackpad direction"};
+
+    return {.registerGesture = true, .error = ""};
+}
+
+// Hyprland 0.56 exposes plugin strings as const char*.
+std::string decodeConfigString(const void* dataptr, bool underlyingIsStdString, const std::string& fallback) {
+    if (!dataptr)
+        return fallback;
+
+    if (underlyingIsStdString) {
+        auto* const* ptr = reinterpret_cast<std::string* const*>(dataptr);
+        return ptr && *ptr ? **ptr : fallback;
+    }
+
+    auto* const* ptr = reinterpret_cast<const char* const*>(dataptr);
+    return ptr && *ptr ? std::string{*ptr} : fallback;
+}
+
 std::string fallbackTokenForVisibleIndex(int visibleIndex) {
     if (visibleIndex < 0)
         return "";

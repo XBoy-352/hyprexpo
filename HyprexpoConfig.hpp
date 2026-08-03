@@ -3,9 +3,6 @@
 #include <cstddef>
 
 namespace HyprexpoConfig {
-// PR #605 compatibility defaults kept separate from the richer sandwichfarm
-// runtime options below. These values are registered for later integration and
-// must not replace the newer config surface.
 inline constexpr int         LEGACY_DYNAMIC_GRID_DEFAULT         = 0;
 inline constexpr int         LEGACY_FILL_GAPS_DEFAULT            = 0;
 inline constexpr int         LEGACY_MRU_SORT_DEFAULT             = 0;
@@ -35,6 +32,8 @@ inline constexpr int         MAX_WORKSPACE_DEFAULT           = 0;
 inline constexpr int         SHOW_WORKSPACE_NUMBERS_DEFAULT  = 0;
 inline constexpr unsigned    WORKSPACE_NUMBER_COLOR_DEFAULT  = 0xFFFFFFFF;
 inline constexpr int         GESTURE_DISTANCE_DEFAULT        = 200;
+inline constexpr int         GESTURE_FINGERS_DEFAULT         = 0;
+inline constexpr const char* GESTURE_DIRECTION_DEFAULT       = "up";
 inline constexpr const char* CANCEL_KEY_DEFAULT              = "escape";
 inline constexpr int         SHOW_CURSOR_DEFAULT             = 1;
 inline constexpr int         SHOW_PINNED_WINDOWS_DEFAULT     = 0;

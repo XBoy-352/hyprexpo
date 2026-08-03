@@ -23,23 +23,28 @@ std::string readFile(const std::string& path) {
 }
 
 std::string extractFunction(const std::string& source, const std::string& signature) {
-    const auto start = source.find(signature);
-    if (start == std::string::npos)
-        return {};
+    for (auto start = source.find(signature); start != std::string::npos; start = source.find(signature, start + 1)) {
+        const auto open = source.find('{', start);
+        if (open == std::string::npos)
+            return {};
 
-    const auto open = source.find('{', start);
-    if (open == std::string::npos)
-        return {};
+        // Ignore forward declarations.
+        const auto semicolon = source.find(';', start);
+        if (semicolon != std::string::npos && semicolon < open)
+            continue;
 
-    int depth = 0;
-    for (size_t i = open; i < source.size(); ++i) {
-        if (source[i] == '{')
-            ++depth;
-        else if (source[i] == '}') {
-            --depth;
-            if (depth == 0)
-                return source.substr(start, i - start + 1);
+        int depth = 0;
+        for (size_t i = open; i < source.size(); ++i) {
+            if (source[i] == '{')
+                ++depth;
+            else if (source[i] == '}') {
+                --depth;
+                if (depth == 0)
+                    return source.substr(start, i - start + 1);
+            }
         }
+
+        return {};
     }
 
     return {};
@@ -159,6 +164,28 @@ int main() {
            "runtime label rendering uses modern label_enable and label_show policy in every grid mode");
     expect(fullRender.find("Hyprexpo::resolveBorderSpec(") != std::string::npos,
            "runtime border rendering uses modern-first border resolution with legacy fallback");
+
+    expect(dispatchersSource.find("HyprlandAPI::getConfigValue") == std::string::npos,
+           "gesture config avoids the legacy hyprlang getter, which is null under CONFIG_LUA");
+
+    const auto gestureSync = extractFunction(dispatchersSource, "void syncExpoGestureFromConfig(");
+    expect(!gestureSync.empty(), "syncExpoGestureFromConfig exists");
+    expect(gestureSync.find("g_unloading || g_gestureRegistrationDisabled") != std::string::npos, "gesture sync bails out while the plugin is unloading");
+
+    const auto gestureRegister = extractFunction(dispatchersSource, "static SDispatchResult registerExpoGesture(");
+    expect(!gestureRegister.empty(), "registerExpoGesture definition exists");
+    expect(gestureRegister.find("g_unloading || g_gestureRegistrationDisabled") != std::string::npos,
+           "every gesture registration path, including the Lua helper, is fenced during unload");
+
+    const auto exitFunction = extractFunction(mainSource, "APICALL EXPORT void PLUGIN_EXIT(");
+    expect(!exitFunction.empty(), "PLUGIN_EXIT exists");
+    const auto disablePos = exitFunction.find("disableExpoGestureRegistration();");
+    const auto reloadPos  = exitFunction.find("Config::mgr()->reload();");
+    expect(disablePos != std::string::npos, "PLUGIN_EXIT disables gesture registration");
+    expect(reloadPos != std::string::npos, "PLUGIN_EXIT reloads the config to clear registered gestures");
+    expect(disablePos < reloadPos, "the registration fence is set before the teardown reload re-runs the config");
+
+    expect(mainSource.find("config.reloaded.listen") != std::string::npos, "the gesture is re-applied after every config reload");
 
     if (failures != 0)
         return 1;
