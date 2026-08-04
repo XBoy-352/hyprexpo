@@ -14,6 +14,8 @@
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
+#include <hyprland/src/layout/space/Space.hpp>
+#include <hyprland/src/layout/target/WindowGroupTarget.hpp>
 #include <hyprland/src/state/MonitorState.hpp>
 #include <hyprland/src/state/WorkspaceState.hpp>
 #include <hyprland/src/state/WorkspacePlacementController.hpp>
@@ -136,24 +138,48 @@ void COverview::redrawID(int id, bool forcelowres) {
     if (PWORKSPACE) {
         // all_monitors: a FOREIGN workspace's windows are laid out in their home monitor's coordinate
         // space, so the layout/renderer leave them outside this monitor's frame and the cell renders
-        // empty. Temporarily reparent the workspace AND its windows onto MON so recalculateMonitor lays
-        // them out in-frame for the capture. Everything (workspace owner, each window's owner + animated
-        // position/size, home-monitor layout) is fully restored after the capture below.
+        // empty. Temporarily reparent the workspace onto MON so the preview activation recalcs its
+        // space against MON's work area and lays it out in-frame for the capture. Everything
+        // (workspace owner, each window's animated position/size, home-monitor layout) is fully
+        // restored after the capture below.
         struct SForeignSave {
-            PHLWINDOW     w;
-            PHLMONITORREF mon;
-            Vector2D      posV, posG, sizeV, sizeG;
+            PHLWINDOW w;
+            Vector2D  posV, posG, sizeV, sizeG;
         };
         std::vector<SForeignSave> foreignSaved;
         PHLMONITORREF             foreignHome;
         const bool                reparentForeign = m_allMonitors && PWORKSPACE->m_monitor && PWORKSPACE->m_monitor.lock() != MON;
         if (reparentForeign) {
+            // Only the WORKSPACE is reparented, never its windows. shouldRenderWindow gates tiled
+            // windows on workspace->m_monitor == pMonitor (plus m_forceRendering, already set by the
+            // preview state) and the layout recalc positions targets via the workspace's m_monitor,
+            // so the per-window m_monitor writes (and their save/restore) are unnecessary. Window
+            // geometry IS saved/restored pre-recalc: recalculate() only sets new layout GOALS, so
+            // without this the windows would animate off toward the capture's monitor-frame geometry
+            // afterwards.
             foreignHome = PWORKSPACE->m_monitor;
-            for (const auto& w : Desktop::windowState()->windows()) {
-                if (!windowVisibleOnWorkspace(w, PWORKSPACE))
-                    continue;
-                foreignSaved.push_back({w, w->m_monitor, w->m_realPosition->value(), w->m_realPosition->goal(), w->m_realSize->value(), w->m_realSize->goal()});
-                w->m_monitor = MON;
+            if (PWORKSPACE->m_space) {
+                // Per-workspace space target list instead of a full-compositor window scan.
+                for (const auto& t : PWORKSPACE->m_space->targets()) {
+                    if (!t)
+                        continue;
+                    if (t->type() == Layout::TARGET_TYPE_GROUP) {
+                        auto* gt = static_cast<Layout::CWindowGroupTarget*>(t.get());
+                        if (!gt || !gt->getGroup())
+                            continue;
+                        for (const auto& wref : gt->getGroup()->windows()) {
+                            const auto w = wref.lock();
+                            if (!windowVisibleOnWorkspace(w, PWORKSPACE))
+                                continue;
+                            foreignSaved.push_back({w, w->m_realPosition->value(), w->m_realPosition->goal(), w->m_realSize->value(), w->m_realSize->goal()});
+                        }
+                        continue;
+                    }
+                    const auto w = t->window();
+                    if (!windowVisibleOnWorkspace(w, PWORKSPACE))
+                        continue;
+                    foreignSaved.push_back({w, w->m_realPosition->value(), w->m_realPosition->goal(), w->m_realSize->value(), w->m_realSize->goal()});
+                }
             }
             PWORKSPACE->m_monitor = MON;
         }
@@ -179,13 +205,14 @@ void COverview::redrawID(int id, bool forcelowres) {
         restoreActiveWorkspaceAfterPreview(MON, previousWS);
 
         if (reparentForeign) {
-            // Restore foreign workspace ownership, each window's owner + animated pos/size, then re-lay
+            // Restore foreign workspace ownership and each window's animated pos/size, then re-lay
             // the home monitor so its real layout is untouched by the capture (runs last → wins).
+            // Window m_monitor never changed (workspace-only reparent), so there is nothing to
+            // restore there.
             PWORKSPACE->m_monitor = foreignHome;
             for (const auto& s : foreignSaved) {
                 if (!s.w)
                     continue;
-                s.w->m_monitor = s.mon;
                 s.w->m_realPosition->setValueAndWarp(s.posV);
                 *s.w->m_realPosition = s.posG;
                 s.w->m_realSize->setValueAndWarp(s.sizeV);
@@ -308,6 +335,11 @@ void COverview::close(bool switchToSelection) {
 
     closing = true;
 
+    // all_monitors: no more progressive streaming — redrawAll() below re-captures every cell in one
+    // batch, so the deferred queue is done.
+    if (m_allMonitors)
+        pendingForeignCaptures.clear();
+
     redrawAll();
 
     if (switchToSelection && TILE.workspaceID != MON->activeWorkspaceID()) {
@@ -410,6 +442,20 @@ void COverview::close(bool switchToSelection) {
 }
 
 void COverview::onPreRender() {
+    // all_monitors: stream deferred foreign-cell captures across frames (bounded per tick) so the
+    // open doesn't stall on N synchronous reparent → render → restore passes. damage() keeps frames
+    // ticking (addDamage hooks → scheduleFrame) until the queue drains, and runs before the grid
+    // pass of this frame so each freshly captured cell is drawn the same frame.
+    if (m_allMonitors && !pendingForeignCaptures.empty()) {
+        for (size_t n = 0; n < FOREIGN_CAPTURES_PER_FRAME && !pendingForeignCaptures.empty(); ++n) {
+            const int id = pendingForeignCaptures.front();
+            pendingForeignCaptures.erase(pendingForeignCaptures.begin());
+            redrawID(id);
+        }
+        flushForeignRecalcs();
+        damage();
+    }
+
     if (damageDirty) {
         damageDirty = false;
         redrawID(closing ? (closeOnID == -1 ? openedID : closeOnID) : openedID);

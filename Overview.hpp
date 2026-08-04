@@ -18,6 +18,11 @@
 // hyprland's fault, but cba to fix.
 constexpr bool ENABLE_LOWRES = false;
 
+// all_monitors: how many deferred foreign-cell captures to run per frame tick in onPreRender().
+// Kept small so the grid appears immediately and foreign tiles stream in over ~100-200ms without
+// stalling a single frame on the whole reparent → render → restore batch.
+constexpr size_t FOREIGN_CAPTURES_PER_FRAME = 2;
+
 class COverview {
   public:
     COverview(PHLWORKSPACE startedOn_, bool swipe = false);
@@ -145,6 +150,11 @@ class COverview {
     // all_monitors: home monitors whose layout was disturbed by a foreign-workspace reparent this
     // batch, deduped and recalculated once via flushForeignRecalcs() instead of once per cell.
     std::vector<PHLMONITORREF>   pendingForeignRecalcs;
+
+    // all_monitors: cell IDs whose foreign-workspace capture was deferred past open (the constructor
+    // only clears their framebuffers). onPreRender() drains a bounded number per frame so the
+    // reparent → render → restore cycle is spread across frames instead of stalling the open.
+    std::vector<int>             pendingForeignCaptures;
 
     std::vector<SWorkspaceImage> images;
 

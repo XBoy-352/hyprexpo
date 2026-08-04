@@ -977,6 +977,25 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
             }
         }
 
+        // all_monitors: a FOREIGN workspace cell costs a reparent → layout recalc → GPU render →
+        // restore cycle per cell. Defer those past open: run a cheap clear-only pass so the cell has
+        // defined (black) content, and let onPreRender() stream the real captures at a few cells per
+        // frame. The grid therefore appears immediately with local cells and fills foreign tiles in
+        // over the first ~100-200ms instead of stalling on N synchronous render passes.
+        const bool deferredForeign = m_allMonitors && PWORKSPACE && PWORKSPACE->m_monitor.lock() != PMONITOR;
+        if (deferredForeign) {
+            CRegion fakeDamage{0, 0, INT16_MAX, INT16_MAX};
+            g_pHyprRenderer->beginRender(PMONITOR, fakeDamage, Render::RENDER_MODE_FULL_FAKE, nullptr, image.fb);
+            clearWithColor(CHyprColor{0, 0, 0, 1.0});
+            g_pHyprRenderer->m_renderData.blockScreenShader = true;
+            g_pHyprRenderer->endRender();
+            if (const auto texture = image.fb->getTexture(); texture)
+                texture->m_transform = isTransformRotated(savedTransform) ? HYPRUTILS_TRANSFORM_180 : HYPRUTILS_TRANSFORM_NORMAL;
+            pendingForeignCaptures.push_back((int)i);
+            image.box = tileBoxForIndex((int)i, pMonitor->m_size, GAP_WIDTH, 0.0, true);
+            continue;
+        }
+
         if (PWORKSPACE == startedOn)
             currentid = i;
 
