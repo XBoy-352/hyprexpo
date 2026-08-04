@@ -4,16 +4,24 @@
 
 #include "ExpoGesture.hpp"
 #include "HyprexpoConfig.hpp"
+#include "HyprexpoLogic.hpp"
+#include "HyprlandConfigCompat.hpp"
 #include "Overview.hpp"
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/shared/actions/ConfigActions.hpp>
+#include <hyprland/src/debug/log/Logger.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
+#include <hyprland/src/desktop/state/GlobalWindowController.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
-#include <hyprland/src/helpers/Monitor.hpp>
+#include <hyprland/src/helpers/Color.hpp>
+#include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/managers/KeybindManager.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
+#include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/managers/input/trackpad/GestureTypes.hpp>
 #include <hyprland/src/managers/input/trackpad/TrackpadGestures.hpp>
+#include <hyprland/src/state/MonitorState.hpp>
+#include <hyprland/src/state/WorkspaceState.hpp>
 #include <lua.hpp>
 #include <xkbcommon/xkbcommon.h>
 #include <algorithm>
@@ -24,8 +32,9 @@
 #include <string>
 #include <string_view>
 
-static bool g_unloading         = false;
-static bool renderingOverview   = false;
+static bool g_unloading                   = false;
+static bool g_gestureRegistrationDisabled = false;
+static bool renderingOverview             = false;
 static SP<Config::Values::CStringValue> g_pCancelKeyConfig;
 
 static SDispatchResult onExpoDispatcher(std::string arg);
@@ -124,7 +133,8 @@ static PHLWINDOW windowToBringFromWorkspace(const PHLWORKSPACE& workspace) {
     if (!workspace)
         return nullptr;
 
-    for (auto it = g_pCompositor->m_windows.rbegin(); it != g_pCompositor->m_windows.rend(); ++it) {
+    const auto& windows = Desktop::windowState()->windows();
+    for (auto it = windows.rbegin(); it != windows.rend(); ++it) {
         const auto& window = *it;
         if (!window || window->m_workspace != workspace || !window->m_isMapped || window->isHidden())
             continue;
@@ -140,14 +150,20 @@ static SDispatchResult bringWindowFromWorkspace(int64_t sourceWorkspaceID) {
         return {.success = false, .error = "selected workspace is empty"};
 
     const auto focusState = Desktop::focusState();
-    const auto monitor    = focusState ? focusState->monitor() : g_pCompositor->getMonitorFromCursor();
+    const auto monitor    = focusState ? focusState->monitor() : State::monitorState()->query().vec(g_pInputManager->getMouseCoordsInternal()).run();
     if (!monitor || !monitor->m_activeWorkspace)
         return {.success = false, .error = "no active monitor/workspace"};
 
     if (sourceWorkspaceID == monitor->activeWorkspaceID())
         return {};
 
-    const auto sourceWorkspace = g_pCompositor->getWorkspaceByID(sourceWorkspaceID);
+    PHLWORKSPACE sourceWorkspace;
+    for (const auto& w : State::workspaceState()->workspacesCopy()) {
+        if (w->m_id == sourceWorkspaceID) {
+            sourceWorkspace = w;
+            break;
+        }
+    }
     if (!sourceWorkspace)
         return {.success = false, .error = "selected workspace is not open"};
 
@@ -155,10 +171,10 @@ static SDispatchResult bringWindowFromWorkspace(int64_t sourceWorkspaceID) {
     if (!window)
         return {.success = false, .error = "selected workspace has no mapped windows"};
 
-    g_pCompositor->moveWindowToWorkspaceSafe(window, monitor->m_activeWorkspace);
+    Desktop::globalWindowController()->moveWindowToWorkspace(window, monitor->m_activeWorkspace);
     if (focusState)
         focusState->fullWindowFocus(window, Desktop::FOCUS_REASON_KEYBIND);
-    g_pCompositor->warpCursorTo(window->middle());
+    window->warpCursor();
     return {};
 }
 
@@ -187,6 +203,8 @@ static SDispatchResult changeToSingleDigitWorkspace(const std::string& arg) {
 
 static std::string workspaceArgForKeysym(xkb_keysym_t keysym) {
     switch (keysym) {
+        case XKB_KEY_0:
+        case XKB_KEY_KP_0: return "0";
         case XKB_KEY_1:
         case XKB_KEY_KP_1: return "1";
         case XKB_KEY_2:
@@ -237,6 +255,24 @@ bool shouldSelectWorkspaceFromKey(const IKeyboard::SKeyEvent& event) {
 
     const auto arg = workspaceArgForKeyEvent(event);
     if (arg.empty())
+        return false;
+
+    static auto const* PNUMBERKEYMODE = (Hyprlang::STRING const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:number_key_mode")->getDataStaticPtr();
+    const auto         mode           = Hyprexpo::numberKeyModeFromString(std::string{*PNUMBERKEYMODE});
+
+    if (mode == Hyprexpo::ENumberKeyMode::Passthrough)
+        return false;
+
+    if (mode == Hyprexpo::ENumberKeyMode::Index) {
+        const int visibleIndex = Hyprexpo::numberKeyToVisibleIndex(arg[0] - '0');
+        if (visibleIndex >= 0)
+            g_pOverview->onKbSelectToken(visibleIndex);
+        return true;
+    }
+
+    // Zero was not handled by the legacy raw-key path. Preserve that behavior
+    // in workspace mode while still allowing zero to select tile 10 in index mode.
+    if (arg == "0")
         return false;
 
     return changeToSingleDigitWorkspace(arg).success;
@@ -424,9 +460,9 @@ static SDispatchResult onExpoDispatcher(std::string arg) {
 
     if (arg == "toggle") {
         if (g_pOverview)
-            g_pOverview->close();
+            g_pOverview->close(false);
         else {
-            const auto PMONITOR = g_pCompositor->getMonitorFromCursor();
+            const auto PMONITOR = State::monitorState()->query().vec(g_pInputManager->getMouseCoordsInternal()).run();
             if (!PMONITOR)
                 return {};
             renderingOverview = true;
@@ -444,14 +480,14 @@ static SDispatchResult onExpoDispatcher(std::string arg) {
 
     if (arg == "off" || arg == "close" || arg == "disable") {
         if (g_pOverview)
-            g_pOverview->close();
+            g_pOverview->close(false);
         return {};
     }
 
     if (g_pOverview)
         return {};
 
-    const auto PMONITOR = g_pCompositor->getMonitorFromCursor();
+    const auto PMONITOR = State::monitorState()->query().vec(g_pInputManager->getMouseCoordsInternal()).run();
     if (!PMONITOR)
         return {};
 
@@ -462,7 +498,8 @@ static SDispatchResult onExpoDispatcher(std::string arg) {
 }
 
 static SDispatchResult registerExpoGesture(int fingerCount, const std::string& directionName, const std::string& action, const std::string& mods, float deltaScale, bool disableInhibit) {
-    if (g_unloading)
+    // PLUGIN_EXIT reloads Lua config before dlclose, so block every registration path.
+    if (g_unloading || g_gestureRegistrationDisabled)
         return {};
 
     if (fingerCount <= 1 || fingerCount >= 10)
@@ -490,6 +527,40 @@ static SDispatchResult registerExpoGesture(int fingerCount, const std::string& d
         return {.success = false, .error = result.error()};
 
     return {};
+}
+
+void disableExpoGestureRegistration() {
+    g_gestureRegistrationDisabled = true;
+}
+
+static void reportGestureConfigError(const std::string& error) {
+    Log::logger->log(Log::ERR, "[hyprexpo] {}", error);
+    HyprlandAPI::addNotification(PHANDLE, "[hyprexpo] " + error, CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
+}
+
+void syncExpoGestureFromConfig() {
+    if (g_unloading || g_gestureRegistrationDisabled)
+        return;
+
+    const int         FINGERS = (int)CompatHyprlandAPI::intValue("plugin:hyprexpo:gesture_fingers");
+    const std::string DIR     = CompatHyprlandAPI::stringValue("plugin:hyprexpo:gesture_direction");
+
+    const auto DECISION = Hyprexpo::evaluateGestureSync({
+        .fingers        = FINGERS,
+        .direction      = DIR,
+        .directionValid = g_pTrackpadGestures && g_pTrackpadGestures->dirForString(DIR) != TRACKPAD_GESTURE_DIR_NONE,
+    });
+
+    if (!DECISION.error.empty()) {
+        reportGestureConfigError(DECISION.error);
+        return;
+    }
+
+    if (!DECISION.registerGesture)
+        return;
+
+    if (const auto RESULT = registerExpoGesture(FINGERS, DIR, "expo", "", 1.F, false); !RESULT.success)
+        reportGestureConfigError(RESULT.error);
 }
 
 static SDispatchResult onKbFocusDispatcher(std::string arg) {
@@ -573,7 +644,7 @@ static SDispatchResult onMovePreviewWindowDispatcher(std::string arg) {
         if (!windowAddress.starts_with("address:"))
             windowAddress = "address:" + windowAddress;
 
-        window = g_pCompositor->getWindowByRegex(windowAddress);
+        window = Desktop::viewState()->query().selector(windowAddress).runWindow();
         if (!window)
             return {.success = false, .error = "window address did not match a mapped window"};
     }

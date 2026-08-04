@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cctype>
+#include <cmath>
 
 namespace Hyprexpo {
 
@@ -40,6 +41,109 @@ std::vector<std::string> splitCommaList(const std::string& value) {
     return entries;
 }
 
+SGridShape computeDynamicGridShape(int visibleCount) {
+    if (visibleCount <= 0)
+        return {1, 1};
+
+    const int cols = std::max(1, static_cast<int>(std::ceil(std::sqrt(static_cast<double>(visibleCount)))));
+    int       rows = static_cast<int>(std::ceil(static_cast<double>(visibleCount) / cols));
+    if (visibleCount > 1 && rows < 2)
+        rows = 2;
+
+    return {cols, rows};
+}
+
+std::optional<std::vector<int64_t>> expandDynamicWorkspaceIDs(const std::vector<int64_t>& workspaceIDs, bool fillGaps, std::size_t maxExpandedWorkspaces) {
+    std::vector<int64_t> normalized = workspaceIDs;
+    std::sort(normalized.begin(), normalized.end());
+    normalized.erase(std::unique(normalized.begin(), normalized.end()), normalized.end());
+
+    if (!fillGaps || normalized.empty())
+        return normalized;
+    if (maxExpandedWorkspaces == 0)
+        return std::nullopt;
+
+    const int64_t  minID = normalized.front();
+    const int64_t  maxID = normalized.back();
+    const __int128 expandedCountWide = static_cast<__int128>(maxID) - static_cast<__int128>(minID) + 1;
+    if (expandedCountWide <= 0 || expandedCountWide > static_cast<__int128>(maxExpandedWorkspaces))
+        return std::nullopt;
+
+    const std::size_t expandedCount = static_cast<std::size_t>(expandedCountWide);
+    std::vector<int64_t> expanded;
+    expanded.reserve(expandedCount);
+    for (std::size_t offset = 0; offset < expandedCount; ++offset)
+        expanded.push_back(minID + static_cast<int64_t>(offset));
+
+    return expanded;
+}
+
+SSize aspectCorrectTileSize(double screenW, double screenH, int cols, int rows, double gap) {
+    if (screenW <= 0.0 || screenH <= 0.0 || cols <= 0 || rows <= 0)
+        return {};
+
+    const double safeGap = std::max(0.0, gap);
+    const double monAspect = screenW / screenH;
+    const double maxTileW  = std::max(0.0, (screenW - safeGap * (cols - 1)) / cols);
+    const double maxTileH  = std::max(0.0, (screenH - safeGap * (rows - 1)) / rows);
+
+    if (maxTileW <= 0.0 || maxTileH <= 0.0 || monAspect <= 0.0)
+        return {0.0, 0.0};
+
+    const double cellAspect = maxTileW / maxTileH;
+    if (cellAspect > monAspect)
+        return {maxTileH * monAspect, maxTileH};
+
+    return {maxTileW, maxTileW / monAspect};
+}
+
+STileLayout computeTileLayout(int index, int visibleCount, SGridShape shape, SSize total, double gap, bool centerPartialRows) {
+    STileLayout layout;
+
+    if (visibleCount <= 0 || index < 0 || index >= visibleCount)
+        return layout;
+
+    shape.cols = std::max(1, shape.cols);
+    shape.rows = std::max(1, shape.rows);
+
+    const SSize tileSize = aspectCorrectTileSize(total.w, total.h, shape.cols, shape.rows, gap);
+    const int   row      = index / shape.cols;
+    const int   col      = index % shape.cols;
+
+    const int    occupiedRows = std::max(1, static_cast<int>(std::ceil(static_cast<double>(visibleCount) / shape.cols)));
+    const int    lastRow      = occupiedRows - 1;
+    const int    tilesInLastRow = visibleCount % shape.cols == 0 ? shape.cols : visibleCount % shape.cols;
+    const double stepX        = tileSize.w + gap;
+    const double stepY        = tileSize.h + gap;
+    const double gridW        = shape.cols * tileSize.w + (shape.cols - 1) * gap;
+    const double gridH        = occupiedRows * tileSize.h + (occupiedRows - 1) * gap;
+    const double baseX        = (total.w - gridW) / 2.0;
+    const double baseY        = (total.h - gridH) / 2.0;
+
+    double x = baseX + col * stepX;
+    const double y = baseY + row * stepY;
+
+    if (centerPartialRows && row == lastRow && tilesInLastRow < shape.cols) {
+        const double rowW = tilesInLastRow * tileSize.w + (tilesInLastRow - 1) * gap;
+        x                 = (total.w - rowW) / 2.0 + col * stepX;
+    }
+
+    layout.box = {x, y, tileSize.w, tileSize.h};
+    layout.row = row;
+    layout.col = col;
+    return layout;
+}
+
+int tileIndexAtPoint(double x, double y, int visibleCount, SGridShape shape, SSize total, double gap, bool centerPartialRows) {
+    for (int i = 0; i < visibleCount; ++i) {
+        const auto layout = computeTileLayout(i, visibleCount, shape, total, gap, centerPartialRows);
+        if (x >= layout.box.x && x < layout.box.x + layout.box.w && y >= layout.box.y && y < layout.box.y + layout.box.h)
+            return i;
+    }
+
+    return -1;
+}
+
 int clampGridColumns(int columns) {
     return std::clamp(columns, HyprexpoConfig::COLUMNS_MIN, HyprexpoConfig::COLUMNS_MAX);
 }
@@ -52,6 +156,25 @@ int tileIndexFromPoint(double x, double y, double width, double height, int side
     const int hx       = std::clamp(static_cast<int>(x / width * safeSide), 0, safeSide - 1);
     const int hy       = std::clamp(static_cast<int>(y / height * safeSide), 0, safeSide - 1);
     return hx + hy * safeSide;
+}
+
+int numberKeyToVisibleIndex(int number) {
+    if (number == 0)
+        return 9;
+    if (number < 1 || number > 9)
+        return -1;
+
+    return number - 1;
+}
+
+ENumberKeyMode numberKeyModeFromString(const std::string& mode) {
+    const auto normalized = lowerString(trimString(mode));
+    if (normalized == "index")
+        return ENumberKeyMode::Index;
+    if (normalized == "passthrough")
+        return ENumberKeyMode::Passthrough;
+
+    return ENumberKeyMode::Workspace;
 }
 
 SDropIntentGeometry computeDropIntentGeometry(const SDropIntentInput& input) {
@@ -72,16 +195,51 @@ SDropIntentGeometry computeDropIntentGeometry(const SDropIntentInput& input) {
     const double pointX  = input.targetTileLocal.x + ratioX * input.targetTileLocal.w;
     const double pointY  = input.targetTileLocal.y + ratioY * input.targetTileLocal.h;
 
+    // proxyW/proxyH are clamped to at most the tile size above, so `tile.x + tile.w - proxyW` is
+    // algebraically >= tile.x. In floating point it is not: when the dragged window is at least as
+    // large as the tile the proxy clamps to exactly tile.w/tile.h, and the subtraction can land an
+    // ULP below tile.x. Passing that as clamp()'s upper bound is UB, and libstdc++ builds with
+    // assertions enabled turn it into an abort() that takes the whole compositor down mid-render.
+    const double maxProxyX = std::max(input.targetTileLocal.x, input.targetTileLocal.x + input.targetTileLocal.w - proxyW);
+    const double maxProxyY = std::max(input.targetTileLocal.y, input.targetTileLocal.y + input.targetTileLocal.h - proxyH);
+
     geometry.valid                = true;
     geometry.targetWorkspacePoint = {ratioX * input.workspaceSize.w, ratioY * input.workspaceSize.h};
     geometry.targetProxyLocal     = {
-        std::clamp(pointX - input.grabOffset.x * scaleX, input.targetTileLocal.x, input.targetTileLocal.x + input.targetTileLocal.w - proxyW),
-        std::clamp(pointY - input.grabOffset.y * scaleY, input.targetTileLocal.y, input.targetTileLocal.y + input.targetTileLocal.h - proxyH),
+        std::clamp(pointX - input.grabOffset.x * scaleX, input.targetTileLocal.x, maxProxyX),
+        std::clamp(pointY - input.grabOffset.y * scaleY, input.targetTileLocal.y, maxProxyY),
         proxyW,
         proxyH,
     };
 
     return geometry;
+}
+
+SGestureSyncDecision evaluateGestureSync(const SGestureConfig& config) {
+    if (config.fingers == 0)
+        return {};
+
+    if (config.fingers < 2 || config.fingers > 9)
+        return {.error = "gesture_fingers must be 0 (disabled) or 2-9, got " + std::to_string(config.fingers)};
+
+    if (!config.directionValid)
+        return {.error = "gesture_direction '" + config.direction + "' is not a valid trackpad direction"};
+
+    return {.registerGesture = true, .error = ""};
+}
+
+// Hyprland 0.56 exposes plugin strings as const char*.
+std::string decodeConfigString(const void* dataptr, bool underlyingIsStdString, const std::string& fallback) {
+    if (!dataptr)
+        return fallback;
+
+    if (underlyingIsStdString) {
+        auto* const* ptr = reinterpret_cast<std::string* const*>(dataptr);
+        return ptr && *ptr ? **ptr : fallback;
+    }
+
+    auto* const* ptr = reinterpret_cast<const char* const*>(dataptr);
+    return ptr && *ptr ? std::string{*ptr} : fallback;
 }
 
 std::string fallbackTokenForVisibleIndex(int visibleIndex) {
@@ -224,6 +382,30 @@ SGradientSpec parseGradientSpec(const std::string& value) {
 bool isGradientBorderSpec(const std::string& value) {
     const auto first = value.find("rgba(");
     return first != std::string::npos && value.find("rgba(", first + 1) != std::string::npos;
+}
+
+bool shouldShowWorkspaceLabel(bool labelEnabled, const std::string& labelShow, bool isHovered, bool isFocused, bool isCurrent) {
+    if (!labelEnabled)
+        return false;
+
+    const auto mode = lowerString(trimString(labelShow));
+    if (mode == "never")
+        return false;
+    if (mode == "hover")
+        return isHovered;
+    if (mode == "focus")
+        return isFocused;
+    if (mode == "hover+focus")
+        return isHovered || isFocused;
+    if (mode == "current+focus")
+        return isCurrent || isFocused;
+
+    return true;
+}
+
+std::string resolveBorderSpec(const std::string& modernSpec, const std::string& legacySpec) {
+    const auto modern = trimString(modernSpec);
+    return modern.empty() ? trimString(legacySpec) : modern;
 }
 
 static std::vector<std::string> splitWhitespace(const std::string& value) {

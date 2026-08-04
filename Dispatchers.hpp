@@ -9,6 +9,8 @@
 SP<Config::Values::CStringValue> createCancelKeyConfig();
 void                             resetDispatcherRuntime();
 void                             registerHyprexpoDispatchers();
+void                             syncExpoGestureFromConfig();
+void                             disableExpoGestureRegistration();
 bool                             isRenderingOverview();
 bool                             shouldCancelOverview(const IKeyboard::SKeyEvent& event);
 bool                             shouldSelectWorkspaceFromKey(const IKeyboard::SKeyEvent& event);

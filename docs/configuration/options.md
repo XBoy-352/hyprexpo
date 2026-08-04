@@ -48,6 +48,47 @@ hl.config({
 `hl.plugin.hyprexpo` is the Lua helper namespace for dispatchers and gestures;
 it is not the configuration block.
 
+## PR #605 Compatibility Keys
+
+These keys are registered for the active-overview port and are intentionally
+separate from the richer sandwichfarm config surface. They are kept for later
+integration and should not replace the newer keys below.
+
+| key | type | legacy meaning | newer sandwichfarm counterpart |
+| --- | --- | --- | --- |
+| `plugin:hyprexpo:dynamic_grid` | int | opt-in dynamic workspace enumeration (default: off) | no direct equivalent yet |
+| `plugin:hyprexpo:fill_gaps` | int | expand min..max workspace IDs when dynamic | no direct equivalent yet |
+| `plugin:hyprexpo:mru_sort` | int | put the current workspace first | no direct equivalent yet |
+| `plugin:hyprexpo:active_highlight_col` | color | active tile highlight color | `border_color_current` |
+| `plugin:hyprexpo:active_highlight_border` | int | active tile highlight width | `border_width` |
+| `plugin:hyprexpo:hover_highlight_col` | color | hovered tile highlight color | `border_color_hover` |
+| `plugin:hyprexpo:hover_highlight_border` | int | hovered tile highlight width | `border_width` |
+| `plugin:hyprexpo:label_pos` | string | legacy underscore anchor such as `top_right` | `label_position` (`top-right`) |
+| `plugin:hyprexpo:label_size` | int | legacy badge size; text renders at roughly half this size | `label_font_size` |
+| `plugin:hyprexpo:label_col` | color | legacy label tint | `label_color` / `label_color_default` |
+| `plugin:hyprexpo:show_workspace_names` | int | legacy name/number toggle | `show_workspace_numbers` and `label_text_mode` |
+| `plugin:hyprexpo:enable_keyboard_nav` | int | legacy keyboard-navigation toggle | `keynav_enable` |
+| `plugin:hyprexpo:enable_drag_move` | int | legacy drag-move toggle | no direct equivalent yet |
+| `plugin:hyprexpo:animate_entry` | int | legacy open animation toggle | no direct equivalent yet |
+| `plugin:hyprexpo:wallpaper_bg` | int | draw the monitor wallpaper behind the overview tiles | optional active-overview extension |
+
+Enable the active-workspace layout explicitly; all compatibility options default
+to the existing fixed-grid behavior:
+
+```ini
+plugin {
+    hyprexpo {
+        dynamic_grid = 1
+        fill_gaps = 0
+        mru_sort = 0
+        show_workspace_names = 1
+        label_pos = top_right
+        label_size = 48
+        wallpaper_bg = 1
+    }
+}
+```
+
 ## Layout and Behavior
 
 | key | type | description | default |
@@ -60,11 +101,30 @@ it is not the configuration block.
 | `plugin:hyprexpo:skip_empty` | bool int | skip empty workspaces using selector `m` when enabled | `0` |
 | `plugin:hyprexpo:max_workspace` | int | when `skip_empty = 0`, cap sequential overview tiles at this workspace ID; `0` keeps Hyprland selector behavior | `0` |
 | `plugin:hyprexpo:gesture_distance` | int | swipe distance considered complete | `200` |
+| `plugin:hyprexpo:gesture_fingers` | int | fingers for the interactive swipe gesture; `0` disables, otherwise `2`-`9` | `0` |
+| `plugin:hyprexpo:gesture_direction` | string | swipe direction: `up`, `down`, `left`, `right`, `vertical`, `horizontal`, `pinch` | `up` |
 | `plugin:hyprexpo:cancel_key` | string | comma-separated key names that close overview without selecting; `none` or `off` disables | `escape` |
 | `plugin:hyprexpo:show_cursor` | bool int | keep the cursor visible while overview is open; set `0` for old hidden-cursor behavior | `1` |
 | `plugin:hyprexpo:show_pinned_windows` | bool int | render pinned/PiP windows in workspace preview thumbnails; default `0` hides them from previews only | `0` |
 
 Pinned windows, including browser Picture-in-Picture windows, stay pinned and visible in normal Hyprland. By default HyprExpo hides them only while capturing workspace preview thumbnails so they do not appear on every tile. Set `show_pinned_windows = 1` to opt in to the old preview behavior.
+
+### Trackpad gesture
+
+`gesture_fingers` and `gesture_direction` register the same interactive, follow-your-finger overview gesture that [`hl.plugin.hyprexpo.gesture{}`](../guides/lua-gestures.md) provides, but from plain config. Hyprland selects either hyprlang or Lua for the whole config and a `.lua` cannot be sourced from a `.conf`, so hyprlang users need this to reach the gesture at all.
+
+```ini
+plugin {
+    hyprexpo {
+        gesture_fingers = 3
+        gesture_direction = vertical
+    }
+}
+```
+
+`gesture_fingers = 0` (the default) registers nothing, leaving trackpad handling entirely to Hyprland and Lua. Use a `gesture_direction` that does not collide with an existing Hyprland `gesture =` binding for the same finger count.
+
+Bad values are rejected when the gesture is registered, not while the config is parsed. An unknown `gesture_direction`, or a `gesture_fingers` value that is neither `0` nor in `2`-`9`, raises a notification and leaves the gesture unregistered rather than failing silently. Under the hyprlang backend these do not reach `hyprctl configerrors`: plugins have no API for adding entries there, and hyprlang does not run the validators attached to plugin config values.
 
 ## Tile Appearance
 
@@ -206,6 +266,7 @@ Then bind `hyprexpo:kb_select` to those tokens in the overview submap.
 | key | type | description | default |
 | --- | --- | --- | --- |
 | `plugin:hyprexpo:keynav_enable` | bool int | enable keyboard navigation and the overview submap behavior | `1` |
+| `plugin:hyprexpo:number_key_mode` | string | raw digit handling: `workspace`, `index`, or `passthrough` for user mappings | `workspace` |
 | `plugin:hyprexpo:keynav_wrap_h` | bool int | wrap horizontally at row edges | `1` |
 | `plugin:hyprexpo:keynav_wrap_v` | bool int | wrap vertically at column edges | `1` |
 | `plugin:hyprexpo:keynav_reading_order` | bool int | use row-major horizontal movement instead of spatial movement | `0` |
