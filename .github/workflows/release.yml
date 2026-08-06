@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build and publish
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -11,6 +17,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     container:
       image: archlinux:latest
 
@@ -40,16 +48,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ env.RELEASE_TAG }}
           # Need the full history + tags so the build bakes the exact tag
           # version (scripts/version.sh uses `git describe`).
           fetch-depth: 0
 
+      - name: Trust checkout inside build container
+        run: git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+
       - name: Verify version matches tag
-        if: startsWith(github.ref, 'refs/tags/')
-        run: make check-version TAG="${GITHUB_REF_NAME}"
+        run: make check-version TAG="${RELEASE_TAG}"
 
       - name: Verify hyprpm commit pins
-        run: make check-pins REF="${GITHUB_REF_NAME}"
+        run: make check-pins REF="${RELEASE_TAG}"
 
       - name: Verify parser tests
         run: make test
@@ -77,9 +88,9 @@ jobs:
           } | tee release-provenance.txt
 
       - name: Create release
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           files: |
             hyprexpo.so
             release-provenance.txt
