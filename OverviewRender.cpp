@@ -388,24 +388,31 @@ void COverview::close(bool switchToSelection) {
                 // (shouldRenderOverviewForMonitor keeps rendering while MON->m_activeWorkspace == startedOn).
                 const auto HOMEOLDWS = HOME->m_activeWorkspace;
                 const auto FOCUS     = Config::Actions::focusMonitor(HOME);
-                if (!FOCUS)
+                if (!FOCUS) {
+                    // Leave handled=false so the local-switch fallback below runs instead of
+                    // switching/animating a monitor the user is not looking at.
                     Log::logger->log(Log::ERR, "[hyprexpo] failed to focus owner monitor: {}", FOCUS.error().message);
-
-                // If the clicked workspace is already HOME's active one, focusMonitor alone lands us
-                // there — re-switching (and animating an already-active workspace) is redundant/wrong.
-                if (HOMEOLDWS != WS) {
+                } else {
+                    // Clear the owner's special workspace unconditionally: when the clicked workspace
+                    // is already HOME's active one, focusMonitor alone lands us there and a lingering
+                    // special workspace would otherwise stay open over it.
                     HOME->setSpecialWorkspace(0);
-                    const auto CHANGE = Config::Actions::changeWorkspace(WS->getConfigName());
-                    if (!CHANGE)
-                        Log::logger->log(Log::ERR, "[hyprexpo] failed to change workspace: {}", CHANGE.error().message);
 
-                    // Animate HOME's old/new workspaces, NOT MON's.
-                    Animation::Workspace::startAnimation(WS, Animation::Workspace::ANIMATION_TYPE_IN, true, true);
-                    if (HOMEOLDWS)
-                        Animation::Workspace::startAnimation(HOMEOLDWS, Animation::Workspace::ANIMATION_TYPE_OUT, false, true);
+                    // If the clicked workspace is already HOME's active one, focusMonitor alone lands us
+                    // there — re-switching (and animating an already-active workspace) is redundant/wrong.
+                    if (HOMEOLDWS != WS) {
+                        const auto CHANGE = Config::Actions::changeWorkspace(WS->getConfigName());
+                        if (!CHANGE)
+                            Log::logger->log(Log::ERR, "[hyprexpo] failed to change workspace: {}", CHANGE.error().message);
+
+                        // Animate HOME's old/new workspaces, NOT MON's.
+                        Animation::Workspace::startAnimation(WS, Animation::Workspace::ANIMATION_TYPE_IN, true, true);
+                        if (HOMEOLDWS)
+                            Animation::Workspace::startAnimation(HOMEOLDWS, Animation::Workspace::ANIMATION_TYPE_OUT, false, true);
+                    }
+
+                    handled = true;
                 }
-
-                handled = true;
             }
         }
 

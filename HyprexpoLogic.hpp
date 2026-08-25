@@ -141,17 +141,6 @@ SWorkspaceMethodSpec     resolveWorkspaceMethodForMonitor(const std::string& con
  */
 std::vector<int64_t>     allMonitorsCellWorkspaceIDs(int tileCount);
 
-/**
- * @brief Cell index of the workspace the overview opened on, within the 1..tileCount enumeration.
- *
- * Clarity helper for the capture-loop currentid seed; not correctness-load-bearing.
- *
- * @param startedOnID The active workspace ID when the overview opened.
- * @param tileCount   Number of grid cells.
- * @return Zero-based index of startedOnID in {1..tileCount}, or 0 if it falls outside that range.
- */
-int                      allMonitorsOpenIndex(int64_t startedOnID, int tileCount);
-
 enum class EClickIntent {
     FocusOwner,    // path (a): focus the workspace's owner monitor and switch there
     PullToCurrent, // path (b): pull the workspace onto the current monitor

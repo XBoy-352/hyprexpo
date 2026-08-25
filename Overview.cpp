@@ -786,6 +786,15 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
 
     images.resize(SIDE_LENGTH * SIDE_LENGTH);
 
+    if (m_allMonitors && dynamicGrid) {
+        // all_monitors enumerates global workspace IDs into a fixed square grid; dynamic_grid
+        // (which fills cells with the local monitor's non-empty workspaces) would overwrite that
+        // enumeration below. Treat all_monitors as authoritative rather than silently degrading
+        // the consolidated overview into the single-monitor grid.
+        Log::logger->log(Log::WARN, "[hyprexpo] all_monitors ignores dynamic_grid");
+        dynamicGrid = false;
+    }
+
     if (m_allMonitors) {
         // Consolidated all-workspaces overview: enumerate global workspace IDs 1..N into the cells
         // regardless of which physical monitor owns each. "Which workspace ID belongs in cell i" is

@@ -314,8 +314,6 @@ int main() {
     expect(method.valid && method.mode == EWorkspaceMethodMode::Center && method.workspace == "current", "global fallback method applies");
 
     expect(allMonitorsCellWorkspaceIDs(9) == std::vector<int64_t>{1, 2, 3, 4, 5, 6, 7, 8, 9}, "all_monitors enumerates 1..9");
-    expect(allMonitorsOpenIndex(5, 9) == 4, "open index maps startedOn ws id to cell");
-    expect(allMonitorsOpenIndex(99, 9) == 0, "out-of-range startedOn falls back to 0");
     expect(resolveClickIntent(true, false) == EClickIntent::PullToCurrent, "right button pulls");
     expect(resolveClickIntent(false, true) == EClickIntent::PullToCurrent, "shift pulls");
     expect(resolveClickIntent(false, false) == EClickIntent::FocusOwner, "plain click focuses owner");

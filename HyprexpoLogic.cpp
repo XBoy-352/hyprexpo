@@ -466,12 +466,6 @@ std::vector<int64_t> allMonitorsCellWorkspaceIDs(int tileCount) {
     return ids;
 }
 
-int allMonitorsOpenIndex(int64_t startedOnID, int tileCount) {
-    if (tileCount > 0 && startedOnID >= 1 && startedOnID <= static_cast<int64_t>(tileCount))
-        return static_cast<int>(startedOnID - 1);
-    return 0;
-}
-
 EClickIntent resolveClickIntent(bool rightButton, bool shiftHeld) {
     return (rightButton || shiftHeld) ? EClickIntent::PullToCurrent : EClickIntent::FocusOwner;
 }
