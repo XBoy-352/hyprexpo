@@ -322,6 +322,11 @@ int main() {
     method = resolveWorkspaceMethodForMonitor("DP-1 first 1, center current", "eDP-1");
     expect(method.valid && method.mode == EWorkspaceMethodMode::Center && method.workspace == "current", "global fallback method applies");
 
+    expect(allMonitorsCellWorkspaceIDs(9) == std::vector<int64_t>{1, 2, 3, 4, 5, 6, 7, 8, 9}, "all_monitors enumerates 1..9");
+    expect(resolveClickIntent(true, false) == EClickIntent::PullToCurrent, "right button pulls");
+    expect(resolveClickIntent(false, true) == EClickIntent::PullToCurrent, "shift pulls");
+    expect(resolveClickIntent(false, false) == EClickIntent::FocusOwner, "plain click focuses owner");
+
     checkGeometryForMonitor(makeSize(1600, 900));
     checkGeometryForMonitor(makeSize(900, 1600));
     checkGeometryForMonitor(makeSize(2560, 1080));

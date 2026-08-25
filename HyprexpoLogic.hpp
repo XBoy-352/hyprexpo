@@ -129,4 +129,31 @@ std::string              resolveBorderSpec(const std::string& modernSpec, const 
 SWorkspaceMethodSpec     parseWorkspaceMethodSpec(const std::string& method);
 SWorkspaceMethodSpec     resolveWorkspaceMethodForMonitor(const std::string& config, const std::string& monitorName);
 
+// --- all_monitors (consolidated all-workspaces overview) pure decisions -------------------------
+
+/**
+ * @brief Global workspace IDs that fill the consolidated grid's cells.
+ *
+ * In all_monitors mode every cell maps to a global workspace by ID rather than to the invoking
+ * monitor's contiguous-from-active range, so the grid shows all workspaces regardless of owner.
+ *
+ * @param tileCount Number of grid cells (sideLength * sideLength, derived from the columns config).
+ * @return {1, 2, ..., tileCount}.
+ */
+std::vector<int64_t>     allMonitorsCellWorkspaceIDs(int tileCount);
+
+enum class EClickIntent {
+    FocusOwner,    // path (a): focus the workspace's owner monitor and switch there
+    PullToCurrent, // path (b): pull the workspace onto the current monitor
+};
+
+/**
+ * @brief Resolve which click action a release maps to in all_monitors mode.
+ *
+ * @param rightButton True if the released button was the right mouse button.
+ * @param shiftHeld    True if Shift was held during the release.
+ * @return PullToCurrent for right-button or Shift+left; FocusOwner for a plain left click.
+ */
+EClickIntent             resolveClickIntent(bool rightButton, bool shiftHeld);
+
 }

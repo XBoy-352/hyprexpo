@@ -210,6 +210,13 @@ void COverview::updateWindowDrag() {
 }
 
 PHLWORKSPACE COverview::ensureWorkspaceForTile(int id) {
+    // all_monitors is view-only: enumerated cell IDs are global workspace IDs that already exist on
+    // other monitors, so createNewWorkspace(image.workspaceID, MON->m_id, ...) below would mint a
+    // duplicate-ID workspace bound to MON. The drag path is bypassed in onCursorSelect, so this must be
+    // unreachable with the flag on — guard it as defense-in-depth.
+    if (m_allMonitors)
+        return nullptr;
+
     if (!isTileValid(id))
         return nullptr;
 
@@ -397,6 +404,8 @@ void COverview::flushQueuedRedraws() {
 
     for (const auto id : ids)
         redrawID(id);
+
+    flushForeignRecalcs();
 
     damage();
 }

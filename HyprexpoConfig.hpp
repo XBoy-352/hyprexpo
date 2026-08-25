@@ -31,6 +31,7 @@ inline constexpr int         GAPS_OUT_DEFAULT                = 0;
 inline constexpr unsigned    BG_COL_DEFAULT                  = 0xFF111111;
 inline constexpr const char* WORKSPACE_METHOD_DEFAULT        = "center current";
 inline constexpr int         SKIP_EMPTY_DEFAULT              = 0;
+inline constexpr int         ALL_MONITORS_DEFAULT            = 0;
 inline constexpr int         MAX_WORKSPACE_DEFAULT           = 0;
 inline constexpr int         SHOW_WORKSPACE_NUMBERS_DEFAULT  = 0;
 inline constexpr unsigned    WORKSPACE_NUMBER_COLOR_DEFAULT  = 0xFFFFFFFF;

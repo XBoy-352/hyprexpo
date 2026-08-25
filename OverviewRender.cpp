@@ -9,17 +9,53 @@
 #include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/config/shared/actions/ConfigActions.hpp>
 #include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
+#include <hyprland/src/layout/LayoutManager.hpp>
 #include <hyprland/src/animation/WorkspaceAnimationController.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
+#include <hyprland/src/layout/space/Space.hpp>
+#include <hyprland/src/layout/target/WindowGroupTarget.hpp>
+#include <hyprland/src/state/MonitorState.hpp>
 #include <hyprland/src/state/WorkspaceState.hpp>
+#include <hyprland/src/state/WorkspacePlacementController.hpp>
+#include <hyprland/src/desktop/state/WindowState.hpp>
 #undef private
 #undef protected
+#include <hyprland/src/debug/log/Logger.hpp>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <string>
 #include <vector>
+
+void COverview::queueForeignRecalc(PHLMONITORREF mon) {
+    if (!mon)
+        return;
+
+    for (const auto& m : pendingForeignRecalcs) {
+        if (m.lock() == mon.lock())
+            return;
+    }
+
+    pendingForeignRecalcs.push_back(mon);
+}
+
+void COverview::flushForeignRecalcs() {
+    if (pendingForeignRecalcs.empty())
+        return;
+
+    const auto mons = pendingForeignRecalcs;
+    pendingForeignRecalcs.clear();
+
+    if (!g_layoutManager)
+        return;
+
+    for (const auto& m : mons) {
+        if (const auto MON = m.lock())
+            g_layoutManager->recalculateMonitor(MON);
+    }
+}
 
 void COverview::redrawID(int id, bool forcelowres) {
     const auto MON = pMonitor.lock();
@@ -74,11 +110,14 @@ void COverview::redrawID(int id, bool forcelowres) {
 
     clearWithColor(CHyprColor{0, 0, 0, 1.0});
 
+    // In all_monitors mode always re-resolve foreign cells by ID and never persist the strong ref:
+    // a foreign workspace destroyed/recreated on its home monitor (same ID) must not keep rendering a
+    // stale object, and we must not pin foreign workspaces alive for the overview's lifetime. Emptied
+    // workspaces fall to the null/WORKSPACE_INVALID path below.
     PHLWORKSPACE PWORKSPACE;
-    if (image.pWorkspace) {
+    if (!m_allMonitors && image.pWorkspace) {
         PWORKSPACE = image.pWorkspace;
-    }
-    else {
+    } else {
         for (const auto& w : State::workspaceState()->workspacesCopy()) {
             if (w->m_id == image.workspaceID) {
                 PWORKSPACE = w;
@@ -86,7 +125,8 @@ void COverview::redrawID(int id, bool forcelowres) {
             }
         }
     }
-    image.pWorkspace      = PWORKSPACE;
+    if (!m_allMonitors)
+        image.pWorkspace = PWORKSPACE;
 
     const auto   restoreWorkspace = MON->m_activeWorkspace;
     PHLWORKSPACE openSpecial      = MON->m_activeSpecialWorkspace;
@@ -96,9 +136,61 @@ void COverview::redrawID(int id, bool forcelowres) {
     startedOn->m_visible = false;
 
     if (PWORKSPACE) {
+        // all_monitors: a FOREIGN workspace's windows are laid out in their home monitor's coordinate
+        // space, so the layout/renderer leave them outside this monitor's frame and the cell renders
+        // empty. Temporarily reparent the workspace onto MON so the preview activation recalcs its
+        // space against MON's work area and lays it out in-frame for the capture. Everything
+        // (workspace owner, each window's animated position/size, home-monitor layout) is fully
+        // restored after the capture below.
+        struct SForeignSave {
+            PHLWINDOW w;
+            Vector2D  posV, posG, sizeV, sizeG;
+        };
+        std::vector<SForeignSave> foreignSaved;
+        PHLMONITORREF             foreignHome;
+        const bool                reparentForeign = m_allMonitors && PWORKSPACE->m_monitor && PWORKSPACE->m_monitor.lock() != MON;
+        if (reparentForeign) {
+            // Only the WORKSPACE is reparented, never its windows. shouldRenderWindow gates tiled
+            // windows on workspace->m_monitor == pMonitor (plus m_forceRendering, already set by the
+            // preview state) and the layout recalc positions targets via the workspace's m_monitor,
+            // so the per-window m_monitor writes (and their save/restore) are unnecessary. Window
+            // geometry IS saved/restored pre-recalc: recalculate() only sets new layout GOALS, so
+            // without this the windows would animate off toward the capture's monitor-frame geometry
+            // afterwards.
+            foreignHome = PWORKSPACE->m_monitor;
+            if (PWORKSPACE->m_space) {
+                // Per-workspace space target list instead of a full-compositor window scan.
+                for (const auto& t : PWORKSPACE->m_space->targets()) {
+                    if (!t)
+                        continue;
+                    if (t->type() == Layout::TARGET_TYPE_GROUP) {
+                        auto* gt = static_cast<Layout::CWindowGroupTarget*>(t.get());
+                        if (!gt || !gt->getGroup())
+                            continue;
+                        for (const auto& wref : gt->getGroup()->windows()) {
+                            const auto w = wref.lock();
+                            if (!windowVisibleOnWorkspace(w, PWORKSPACE))
+                                continue;
+                            foreignSaved.push_back({w, w->m_realPosition->value(), w->m_realPosition->goal(), w->m_realSize->value(), w->m_realSize->goal()});
+                        }
+                        continue;
+                    }
+                    const auto w = t->window();
+                    if (!windowVisibleOnWorkspace(w, PWORKSPACE))
+                        continue;
+                    foreignSaved.push_back({w, w->m_realPosition->value(), w->m_realPosition->goal(), w->m_realSize->value(), w->m_realSize->goal()});
+                }
+            }
+            PWORKSPACE->m_monitor = MON;
+        }
+
         const auto previousWS    = activateWorkspaceForPreview(MON, PWORKSPACE);
         const auto previewStates = applyExclusiveWorkspacePreviewState(PWORKSPACE);
-        const auto windowState   = PWORKSPACE == startedOn ? std::vector<SWindowPreviewState>{} : applyWorkspaceWindowGoalState(PWORKSPACE);
+        // Local-only goal-restore exemption (see normalizeMonitorWorkspaceRenderState note): never skip
+        // the relayout-undo for a foreign workspace, or its home layout corrupts. The added m_monitor
+        // clause is gated behind m_allMonitors so the flag-OFF path stays byte-identical to stock
+        // (PWORKSPACE == startedOn), which is the only behaviour that can hold without the feature.
+        const auto windowState   = (PWORKSPACE == startedOn && (!m_allMonitors || PWORKSPACE->m_monitor == MON)) ? std::vector<SWindowPreviewState>{} : applyWorkspaceWindowGoalState(PWORKSPACE);
 
         if (PWORKSPACE == startedOn)
             MON->m_activeSpecialWorkspace = openSpecial;
@@ -111,6 +203,29 @@ void COverview::redrawID(int id, bool forcelowres) {
         restoreWorkspaceWindowGoalState(windowState);
         restoreWorkspacePreviewStates(previewStates);
         restoreActiveWorkspaceAfterPreview(MON, previousWS);
+
+        if (reparentForeign) {
+            // Restore foreign workspace ownership and each window's animated pos/size, then re-lay
+            // the home monitor so its real layout is untouched by the capture (runs last → wins).
+            // Window m_monitor never changed (workspace-only reparent), so there is nothing to
+            // restore there.
+            PWORKSPACE->m_monitor = foreignHome;
+            for (const auto& s : foreignSaved) {
+                if (!s.w)
+                    continue;
+                s.w->m_realPosition->setValueAndWarp(s.posV);
+                *s.w->m_realPosition = s.posG;
+                s.w->m_realSize->setValueAndWarp(s.sizeV);
+                *s.w->m_realSize = s.sizeG;
+            }
+            // Deferred: recalculating the home monitor's layout here is a full relayout of every
+            // window on it. Several cells in the same redrawAll/flushQueuedRedraws batch typically
+            // share the same foreign home monitor (e.g. 5 workspaces on one external display), so
+            // queue it and recalc each distinct monitor once via flushForeignRecalcs() at the end
+            // of the batch instead of once per cell.
+            if (foreignHome)
+                queueForeignRecalc(foreignHome);
+        }
 
         if (PWORKSPACE == startedOn)
             MON->m_activeSpecialWorkspace.reset();
@@ -152,6 +267,8 @@ void COverview::redrawAll(bool forcelowres) {
     for (size_t i = 0; i < images.size(); ++i) {
         redrawID(i, forcelowres);
     }
+
+    flushForeignRecalcs();
 }
 
 void COverview::damage() {
@@ -218,43 +335,141 @@ void COverview::close(bool switchToSelection) {
 
     closing = true;
 
+    // all_monitors: no more progressive streaming — redrawAll() below re-captures every cell in one
+    // batch, so the deferred queue is done.
+    if (m_allMonitors)
+        pendingForeignCaptures.clear();
+
     redrawAll();
 
     if (switchToSelection && TILE.workspaceID != MON->activeWorkspaceID()) {
-        MON->setSpecialWorkspace(0);
+        bool handled = false;
 
-        // If this tile's workspace was WORKSPACE_INVALID, move to the next
-        // empty workspace. This should only happen if skip_empty is on, in
-        // which case some tiles will be left with this ID intentionally.
-        const int  NEWID = TILE.workspaceID == WORKSPACE_INVALID ? getWorkspaceIDNameFromString("emptynm").id : TILE.workspaceID;
+        if (m_allMonitors) {
+            // Re-resolve by ID; never trust a cached home monitor across frames.
+            PHLWORKSPACE WS;
+            for (const auto& w : State::workspaceState()->workspacesCopy()) {
+                if (w->m_id == TILE.workspaceID) {
+                    WS = w;
+                    break;
+                }
+            }
+            const auto HOME = WS ? WS->m_monitor.lock() : nullptr;
 
-        PHLWORKSPACE NEWIDWS;
-        for (const auto& w : State::workspaceState()->workspacesCopy()) {
-            if (w->m_id == NEWID) {
-                NEWIDWS = w;
-                break;
+            // TOCTOU re-validation: an unplug between open and click can reassign WS->m_monitor to a
+            // survivor. Confirm HOME is still the owner AND present in the live monitor list before we
+            // focus it; otherwise fall through to the local-switch fallback.
+            bool homeValid = false;
+            if (HOME) {
+                const bool stillOwner = HOME == WS->m_monitor.lock();
+                const auto& MONITORS  = State::monitorState()->monitors();
+                const bool  live      = std::find(MONITORS.begin(), MONITORS.end(), HOME) != MONITORS.end();
+                homeValid             = stillOwner && live;
+            }
+
+            if (m_pullToCurrent && WS) {
+                // path (b): PULL the workspace onto the current monitor and switch to it here.
+                MON->setSpecialWorkspace(0);
+                const auto OLDWS = MON->m_activeWorkspace;
+                State::workspacePlacementController()->moveWorkspaceToMonitor(WS, MON, false);
+                const auto CHANGE = Config::Actions::changeWorkspaceOnCurrentMonitor(WS);
+                if (!CHANGE) {
+                    Log::logger->log(Log::ERR, "[hyprexpo] failed to pull workspace: {}", CHANGE.error().message);
+                } else {
+                    // MON's IN/OUT (animation targets MON — correct for path b).
+                    Animation::Workspace::startAnimation(MON->m_activeWorkspace, Animation::Workspace::ANIMATION_TYPE_IN, true, true);
+                    Animation::Workspace::startAnimation(OLDWS, Animation::Workspace::ANIMATION_TYPE_OUT, false, true);
+
+                    startedOn = MON->m_activeWorkspace;
+                }
+
+                handled = true;
+            } else if (WS && homeValid && HOME != MON) {
+                // path (a): FOCUS the owner monitor and switch there. MON stays on startedOn so the
+                // overview tears down cleanly via the unconditional end-callback below
+                // (shouldRenderOverviewForMonitor keeps rendering while MON->m_activeWorkspace == startedOn).
+                const auto HOMEOLDWS = HOME->m_activeWorkspace;
+                const auto FOCUS     = Config::Actions::focusMonitor(HOME);
+                if (!FOCUS) {
+                    // Leave handled=false so the local-switch fallback below runs instead of
+                    // switching/animating a monitor the user is not looking at.
+                    Log::logger->log(Log::ERR, "[hyprexpo] failed to focus owner monitor: {}", FOCUS.error().message);
+                } else {
+                    // Clear the owner's special workspace unconditionally: when the clicked workspace
+                    // is already HOME's active one, focusMonitor alone lands us there and a lingering
+                    // special workspace would otherwise stay open over it.
+                    HOME->setSpecialWorkspace(0);
+
+                    // If the clicked workspace is already HOME's active one, focusMonitor alone lands us
+                    // there — re-switching (and animating an already-active workspace) is redundant/wrong.
+                    if (HOMEOLDWS != WS) {
+                        const auto CHANGE = Config::Actions::changeWorkspace(WS->getConfigName());
+                        if (!CHANGE) {
+                            Log::logger->log(Log::ERR, "[hyprexpo] failed to change workspace: {}", CHANGE.error().message);
+                        } else {
+                            // Animate HOME's old/new workspaces, NOT MON's.
+                            Animation::Workspace::startAnimation(WS, Animation::Workspace::ANIMATION_TYPE_IN, true, true);
+                            if (HOMEOLDWS)
+                                Animation::Workspace::startAnimation(HOMEOLDWS, Animation::Workspace::ANIMATION_TYPE_OUT, false, true);
+                        }
+                    }
+
+                    handled = true;
+                }
             }
         }
 
-        const auto OLDWS = MON->m_activeWorkspace;
+        if (!handled) {
+            MON->setSpecialWorkspace(0);
 
-        const auto CHANGE = !NEWIDWS ? Config::Actions::changeWorkspace(std::to_string(NEWID)) : Config::Actions::changeWorkspace(NEWIDWS->getConfigName());
-        if (!CHANGE)
-            Log::logger->log(Log::ERR, "[hyprexpo] failed to change workspace: {}", CHANGE.error().message);
+            // If this tile's workspace was WORKSPACE_INVALID, move to the next
+            // empty workspace. This should only happen if skip_empty is on, in
+            // which case some tiles will be left with this ID intentionally.
+            const int  NEWID = TILE.workspaceID == WORKSPACE_INVALID ? getWorkspaceIDNameFromString("emptynm").id : TILE.workspaceID;
 
-        Animation::Workspace::startAnimation(MON->m_activeWorkspace, Animation::Workspace::ANIMATION_TYPE_IN, true, true);
-        Animation::Workspace::startAnimation(OLDWS, Animation::Workspace::ANIMATION_TYPE_OUT, false, true);
+            PHLWORKSPACE NEWIDWS;
+            for (const auto& w : State::workspaceState()->workspacesCopy()) {
+                if (w->m_id == NEWID) {
+                    NEWIDWS = w;
+                    break;
+                }
+            }
 
-        startedOn = MON->m_activeWorkspace;
+            const auto OLDWS = MON->m_activeWorkspace;
+
+            const auto CHANGE = !NEWIDWS ? Config::Actions::changeWorkspace(std::to_string(NEWID)) : Config::Actions::changeWorkspace(NEWIDWS->getConfigName());
+            if (!CHANGE)
+                Log::logger->log(Log::ERR, "[hyprexpo] failed to change workspace: {}", CHANGE.error().message);
+
+            Animation::Workspace::startAnimation(MON->m_activeWorkspace, Animation::Workspace::ANIMATION_TYPE_IN, true, true);
+            Animation::Workspace::startAnimation(OLDWS, Animation::Workspace::ANIMATION_TYPE_OUT, false, true);
+
+            startedOn = MON->m_activeWorkspace;
+        }
     }
 
     size->setCallbackOnEnd(removeOverview);
 }
 
 void COverview::onPreRender() {
+    // all_monitors: stream deferred foreign-cell captures across frames (bounded per tick) so the
+    // open doesn't stall on N synchronous reparent → render → restore passes. damage() keeps frames
+    // ticking (addDamage hooks → scheduleFrame) until the queue drains, and runs before the grid
+    // pass of this frame so each freshly captured cell is drawn the same frame.
+    if (m_allMonitors && !pendingForeignCaptures.empty()) {
+        for (size_t n = 0; n < FOREIGN_CAPTURES_PER_FRAME && !pendingForeignCaptures.empty(); ++n) {
+            const int id = pendingForeignCaptures.front();
+            pendingForeignCaptures.erase(pendingForeignCaptures.begin());
+            redrawID(id);
+        }
+        flushForeignRecalcs();
+        damage();
+    }
+
     if (damageDirty) {
         damageDirty = false;
         redrawID(closing ? (closeOnID == -1 ? openedID : closeOnID) : openedID);
+        flushForeignRecalcs();
     }
 }
 

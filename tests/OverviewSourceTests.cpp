@@ -175,6 +175,15 @@ int main() {
     expect(fullRender.find("Hyprexpo::resolveBorderSpec(") != std::string::npos,
            "runtime border rendering uses modern-first border resolution with legacy fallback");
 
+    expect(overviewConstructor.find("pendingForeignCaptures.push_back") != std::string::npos,
+           "foreign cells are deferred past open instead of blocking the open with synchronous captures");
+    expect(renderSource.find("FOREIGN_CAPTURES_PER_FRAME") != std::string::npos,
+           "deferred foreign captures are streamed at a bounded rate per frame");
+    expect(renderSource.find("m_space->targets()") != std::string::npos,
+           "foreign-cell window saves use the per-workspace space target list, not a full-compositor scan");
+    expect(renderSource.find("s.w->m_monitor = s.mon;") == std::string::npos,
+           "foreign-cell capture no longer reparents windows (workspace-only reparent)");
+
     expect(dispatchersSource.find("HyprlandAPI::getConfigValue") == std::string::npos,
            "gesture config avoids the legacy hyprlang getter, which is null under CONFIG_LUA");
 

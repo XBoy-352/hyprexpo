@@ -18,6 +18,11 @@
 // hyprland's fault, but cba to fix.
 constexpr bool ENABLE_LOWRES = false;
 
+// all_monitors: how many deferred foreign-cell captures to run per frame tick in onPreRender().
+// Kept small so the grid appears immediately and foreign tiles stream in over ~100-200ms without
+// stalling a single frame on the whole reparent → render → restore batch.
+constexpr size_t FOREIGN_CAPTURES_PER_FRAME = 2;
+
 class COverview {
   public:
     COverview(PHLWORKSPACE startedOn_, bool swipe = false);
@@ -105,6 +110,8 @@ class COverview {
     void       redrawDraggedWindowTiles(int source, int target);
     void       queueRedrawID(int id);
     void       flushQueuedRedraws();
+    void       queueForeignRecalc(PHLMONITORREF mon);
+    void       flushForeignRecalcs();
     PHLWINDOW  windowAtTilePoint(int id, const Vector2D& localPoint) const;
     Vector2D   tilePointToWorkspacePoint(int id, const Vector2D& localPoint) const;
     PHLWORKSPACE ensureWorkspaceForTile(int id);
@@ -140,6 +147,15 @@ class COverview {
     int                          redrawSettleTicks = 0;
     SP<CEventLoopTimer>          redrawSettleTimer;
 
+    // all_monitors: home monitors whose layout was disturbed by a foreign-workspace reparent this
+    // batch, deduped and recalculated once via flushForeignRecalcs() instead of once per cell.
+    std::vector<PHLMONITORREF>   pendingForeignRecalcs;
+
+    // all_monitors: cell IDs whose foreign-workspace capture was deferred past open (the constructor
+    // only clears their framebuffers). onPreRender() drains a bounded number per frame so the
+    // reparent → render → restore cycle is spread across frames instead of stalling the open.
+    std::vector<int>             pendingForeignCaptures;
+
     std::vector<SWorkspaceImage> images;
 
     PHLWORKSPACE                 startedOn;
@@ -156,6 +172,15 @@ class COverview {
     CHyprSignalListener          touchMoveHook;
     CHyprSignalListener          touchDownHook;
     CHyprSignalListener          workspaceMoveHook;
+    CHyprSignalListener          monitorAddedHook;
+    CHyprSignalListener          monitorRemovedHook;
+
+    // all_monitors (consolidated all-workspaces overview): when true, cells enumerate global
+    // workspace IDs 1..N regardless of which physical monitor owns each. View-only.
+    bool                         m_allMonitors   = false;
+    // Click intent captured in onCursorSelect, consumed by close(): true => pull onto current
+    // monitor (path b), false => focus the owner monitor and switch there (path a).
+    bool                         m_pullToCurrent = false;
 
     bool                         swipe             = false;
     bool                         swipeWasCommenced = false;
