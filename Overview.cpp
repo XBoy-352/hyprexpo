@@ -812,6 +812,13 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
     const int64_t maxWorkspace = std::max<Hyprlang::INT>(0, **PMAXWS);
     std::string   selector     = skipEmpty ? "m" : "r";
 
+    if (!methodCenter && !skipEmpty && maxWorkspace <= 0 && startedOn) {
+        SIDE_LENGTH = Hyprexpo::gridColumnsToIncludeWorkspace(SIDE_LENGTH, methodStartID, (int)startedOn->m_id, HyprexpoConfig::COLUMNS_MAX);
+        gridShape   = {SIDE_LENGTH, SIDE_LENGTH};
+    }
+
+    images.resize(SIDE_LENGTH * SIDE_LENGTH);
+
     if (!skipEmpty && maxWorkspace > 0) {
         const int64_t tileCount = SIDE_LENGTH * SIDE_LENGTH;
         const int64_t maxStart  = std::max<int64_t>(1, maxWorkspace - tileCount + 1);

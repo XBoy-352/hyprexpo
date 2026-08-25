@@ -36,6 +36,7 @@ static bool g_unloading                   = false;
 static bool g_gestureRegistrationDisabled = false;
 static bool renderingOverview             = false;
 static SP<Config::Values::CStringValue> g_pCancelKeyConfig;
+static SP<Config::Values::CStringValue> g_pNumberKeyModeConfig;
 
 static SDispatchResult onExpoDispatcher(std::string arg);
 static SDispatchResult onKbFocusDispatcher(std::string arg);
@@ -257,7 +258,7 @@ bool shouldSelectWorkspaceFromKey(const IKeyboard::SKeyEvent& event) {
     if (arg.empty())
         return false;
 
-    const auto mode = Hyprexpo::numberKeyModeFromString(CompatHyprlandAPI::stringValue("plugin:hyprexpo:number_key_mode"));
+    const auto mode = Hyprexpo::numberKeyModeFromString(g_pNumberKeyModeConfig ? g_pNumberKeyModeConfig->value() : HyprexpoConfig::NUMBER_KEY_MODE_DEFAULT);
 
     if (mode == Hyprexpo::ENumberKeyMode::Passthrough)
         return false;
@@ -659,9 +660,16 @@ SP<Config::Values::CStringValue> createCancelKeyConfig() {
     return g_pCancelKeyConfig;
 }
 
+SP<Config::Values::CStringValue> createNumberKeyModeConfig() {
+    g_pNumberKeyModeConfig =
+        makeShared<Config::Values::CStringValue>("plugin:hyprexpo:number_key_mode", "raw number-key handling: workspace, index, or passthrough", HyprexpoConfig::NUMBER_KEY_MODE_DEFAULT);
+    return g_pNumberKeyModeConfig;
+}
+
 void resetDispatcherRuntime() {
     g_unloading = true;
     g_pCancelKeyConfig.reset();
+    g_pNumberKeyModeConfig.reset();
 }
 
 bool isRenderingOverview() {

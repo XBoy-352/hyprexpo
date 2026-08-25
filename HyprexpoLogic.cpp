@@ -148,6 +148,20 @@ int clampGridColumns(int columns) {
     return std::clamp(columns, HyprexpoConfig::COLUMNS_MIN, HyprexpoConfig::COLUMNS_MAX);
 }
 
+int gridColumnsToIncludeWorkspace(int configuredColumns, int firstWorkspaceID, int activeWorkspaceID, int maxColumns) {
+    const int cap  = std::max(HyprexpoConfig::COLUMNS_MIN, maxColumns);
+    int       cols = std::clamp(configuredColumns, HyprexpoConfig::COLUMNS_MIN, cap);
+
+    if (activeWorkspaceID <= firstWorkspaceID)
+        return cols;
+
+    const long long needed = static_cast<long long>(activeWorkspaceID) - firstWorkspaceID + 1;
+    while (static_cast<long long>(cols) * cols < needed && cols < cap)
+        ++cols;
+
+    return cols;
+}
+
 int tileIndexFromPoint(double x, double y, double width, double height, int sideLength) {
     if (width <= 0 || height <= 0 || sideLength <= 0)
         return -1;
