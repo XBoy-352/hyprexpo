@@ -993,9 +993,6 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
         // over the first ~100-200ms instead of stalling on N synchronous render passes.
         const bool deferredForeign = m_allMonitors && PWORKSPACE && PWORKSPACE->m_monitor.lock() != PMONITOR;
         if (deferredForeign) {
-            CRegion fakeDamage{0, 0, INT16_MAX, INT16_MAX};
-            g_pHyprRenderer->beginRender(PMONITOR, fakeDamage, Render::RENDER_MODE_FULL_FAKE, nullptr, image.fb);
-            clearWithColor(CHyprColor{0, 0, 0, 1.0});
             g_pHyprRenderer->m_renderData.blockScreenShader = true;
             g_pHyprRenderer->endRender();
             if (const auto texture = image.fb->getTexture(); texture)

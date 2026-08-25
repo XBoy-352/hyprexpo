@@ -373,15 +373,17 @@ void COverview::close(bool switchToSelection) {
                 const auto OLDWS = MON->m_activeWorkspace;
                 State::workspacePlacementController()->moveWorkspaceToMonitor(WS, MON, false);
                 const auto CHANGE = Config::Actions::changeWorkspaceOnCurrentMonitor(WS);
-                if (!CHANGE)
+                if (!CHANGE) {
                     Log::logger->log(Log::ERR, "[hyprexpo] failed to pull workspace: {}", CHANGE.error().message);
+                } else {
+                    // MON's IN/OUT (animation targets MON — correct for path b).
+                    Animation::Workspace::startAnimation(MON->m_activeWorkspace, Animation::Workspace::ANIMATION_TYPE_IN, true, true);
+                    Animation::Workspace::startAnimation(OLDWS, Animation::Workspace::ANIMATION_TYPE_OUT, false, true);
 
-                // MON's IN/OUT (animation targets MON — correct for path b).
-                Animation::Workspace::startAnimation(MON->m_activeWorkspace, Animation::Workspace::ANIMATION_TYPE_IN, true, true);
-                Animation::Workspace::startAnimation(OLDWS, Animation::Workspace::ANIMATION_TYPE_OUT, false, true);
+                    startedOn = MON->m_activeWorkspace;
+                }
 
-                startedOn = MON->m_activeWorkspace;
-                handled   = true;
+                handled = true;
             } else if (WS && homeValid && HOME != MON) {
                 // path (a): FOCUS the owner monitor and switch there. MON stays on startedOn so the
                 // overview tears down cleanly via the unconditional end-callback below
@@ -402,13 +404,14 @@ void COverview::close(bool switchToSelection) {
                     // there — re-switching (and animating an already-active workspace) is redundant/wrong.
                     if (HOMEOLDWS != WS) {
                         const auto CHANGE = Config::Actions::changeWorkspace(WS->getConfigName());
-                        if (!CHANGE)
+                        if (!CHANGE) {
                             Log::logger->log(Log::ERR, "[hyprexpo] failed to change workspace: {}", CHANGE.error().message);
-
-                        // Animate HOME's old/new workspaces, NOT MON's.
-                        Animation::Workspace::startAnimation(WS, Animation::Workspace::ANIMATION_TYPE_IN, true, true);
-                        if (HOMEOLDWS)
-                            Animation::Workspace::startAnimation(HOMEOLDWS, Animation::Workspace::ANIMATION_TYPE_OUT, false, true);
+                        } else {
+                            // Animate HOME's old/new workspaces, NOT MON's.
+                            Animation::Workspace::startAnimation(WS, Animation::Workspace::ANIMATION_TYPE_IN, true, true);
+                            if (HOMEOLDWS)
+                                Animation::Workspace::startAnimation(HOMEOLDWS, Animation::Workspace::ANIMATION_TYPE_OUT, false, true);
+                        }
                     }
 
                     handled = true;

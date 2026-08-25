@@ -257,8 +257,7 @@ bool shouldSelectWorkspaceFromKey(const IKeyboard::SKeyEvent& event) {
     if (arg.empty())
         return false;
 
-    static auto const* PNUMBERKEYMODE = (Hyprlang::STRING const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:number_key_mode")->getDataStaticPtr();
-    const auto         mode           = Hyprexpo::numberKeyModeFromString(std::string{*PNUMBERKEYMODE});
+    const auto mode = Hyprexpo::numberKeyModeFromString(CompatHyprlandAPI::stringValue("plugin:hyprexpo:number_key_mode"));
 
     if (mode == Hyprexpo::ENumberKeyMode::Passthrough)
         return false;
